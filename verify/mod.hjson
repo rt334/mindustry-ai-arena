@@ -1,0 +1,7 @@
+name: ai-arena-verify
+displayName: "AI Arena Verify"
+author: rt334
+description: "P0 技术验证：headless mod 加载 / Core.app.post / 自定义 Team / 影子 Player"
+version: "1.0"
+minGameVersion: "146"
+main: aiverify.VerifyMod

@@ -1,0 +1,17 @@
+# 默认按文本处理，统一用 LF
+* text=auto eol=lf
+
+# PowerShell 脚本必须保持原样：它带 UTF-8 BOM，且 BOM 是文件内容的一部分。
+# 让 git 不做任何转换，避免 BOM 或换行符被改写导致中文乱码。
+*.ps1 -text
+
+# 二进制
+*.jar binary
+*.png binary
+*.msav binary
+
+# 文档
+*.md text eol=lf
+*.json text eol=lf
+*.hjson text eol=lf
+*.java text eol=lf

@@ -1,0 +1,7 @@
+name: ai-arena
+displayName: "AI Arena"
+author: rt334
+description: "多 AI PvP 竞技场：HTTP 接口 + 对等约束 + 观战/回放"
+version: "0.1.0"
+minGameVersion: "146"
+main: aiarena.AIArenaMod

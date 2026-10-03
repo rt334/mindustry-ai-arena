@@ -1,0 +1,7 @@
+name: ai-observer
+displayName: "AI Arena Observer"
+author: rt334
+description: "AI 竞技场观战端：自由相机 + 视角切换，只读不参与"
+version: "0.1.0"
+minGameVersion: "146"
+main: aiobserver.ObserverMod

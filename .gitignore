@@ -1,0 +1,39 @@
+# 构建产物
+*.class
+classes/
+build/
+.gradle/
+
+# Mod jar（从源码构建，不纳入版本控制）
+mod/ai-arena.jar
+observer/ai-observer.jar
+verify/ai-arena-verify.jar
+
+# 服务器运行目录（含配置、token、日志、录像）
+server-run/
+
+# 日志与临时文件
+*.log
+out.log
+err.log
+arena-out.log
+arena-err.log
+
+# 下载的依赖
+_dl/
+
+# 配置备份
+*.bak
+*.bak-*
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# 系统
+Thumbs.db
+Desktop.ini
+.DS_Store

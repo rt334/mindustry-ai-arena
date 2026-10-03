@@ -1,0 +1,404 @@
+package aiarena;
+
+import arc.Core;
+import arc.util.Time;
+import mindustry.Vars;
+import mindustry.game.Team;
+
+/**
+ * 主线程只读快照。
+ *
+ * 设计要点（源自 DESIGN.md 5.2 读写分离）：
+ *
+ *   读:  主线程定期生成不可变快照 ──→ HTTP 线程直接读（零跨线程，零阻塞）
+ *   写:  HTTP 线程投递任务 ──→ 主线程队列执行 ──→ 结果回传
+ *
+ * 为什么读不能走 Core.app.post：
+ *   post 在下一帧才执行，每个读请求至少延迟 1 帧；且 Future 等待会阻塞
+ *   HTTP 线程，AI 轮询时会把线程池耗尽。主线程一旦因大战场变慢，HTTP 全线卡死。
+ *
+ * 并发模型：快照对象构造完成后不再修改，主线程整体替换 volatile 引用。
+ * HTTP 线程读到的是某个完整版本，不会看到半个状态。
+ */
+public final class Snapshot {
+
+    /** 当前快照。主线程写入，HTTP 线程读取。 */
+    private static volatile State current = State.empty();
+
+    private static int lastHeavyTick = -1;
+
+    /** 轻量状态每 tick 刷新；重量级列表按 HEAVY_INTERVAL 刷新。 */
+    private static final int HEAVY_INTERVAL_TICKS = 6;   // ≈ 10 Hz @ 60 FPS
+
+    private Snapshot() {}
+
+    /** 不可变快照。 */
+    public static final class State {
+        public final int tick;
+        public final int wave;
+        public final boolean playing;
+        public final boolean paused;
+        public final boolean gameOver;
+        public final boolean pvp;
+        public final boolean fog;
+        public final int worldWidth, worldHeight;
+
+        public final TeamInfo[] teams;
+        public final UnitInfo[] units;
+        public final BuildInfo[] builds;
+
+        /** 单位/建筑列表是否是本 tick 新刷的（供调用方判断新鲜度）。 */
+        public final boolean heavyFresh;
+
+        State(int tick, int wave, boolean playing, boolean paused, boolean gameOver,
+              boolean pvp, boolean fog, int worldWidth, int worldHeight,
+              TeamInfo[] teams, UnitInfo[] units, BuildInfo[] builds, boolean heavyFresh) {
+            this.tick = tick;
+            this.wave = wave;
+            this.playing = playing;
+            this.paused = paused;
+            this.gameOver = gameOver;
+            this.pvp = pvp;
+            this.fog = fog;
+            this.worldWidth = worldWidth;
+            this.worldHeight = worldHeight;
+            this.teams = teams;
+            this.units = units;
+            this.builds = builds;
+            this.heavyFresh = heavyFresh;
+        }
+
+        static State empty() {
+            return new State(0, 0, false, false, false, false, false, 0, 0,
+                             new TeamInfo[0], new UnitInfo[0], new BuildInfo[0], false);
+        }
+    }
+
+    public static final class TeamInfo {
+        public final int id;
+        public final String name;
+        public final boolean ai;
+        public final boolean alive;
+        public final int cores;
+        public final int players;
+
+        TeamInfo(int id, String name, boolean ai, boolean alive, int cores, int players) {
+            this.id = id; this.name = name; this.ai = ai; this.alive = alive;
+            this.cores = cores; this.players = players;
+        }
+    }
+
+    public static final class UnitInfo {
+        public final int id;
+        public final String type;
+        public final int team;
+        public final float x, y;
+        public final float health, maxHealth;
+        public final float rotation;
+        public final boolean canBuild;
+        /** 携带物（item 名 → 数量）。单位能捡起物品并携带，这是玩家能看到的信息。 */
+        public final String[] stackItems;
+        public final int[] stackAmounts;
+        /** 被控制的玩家 id；-1 表示 AI 控制。 */
+        public final int controllerId;
+        /** 当前指令名。 */
+        public final String command;
+
+        UnitInfo(int id, String type, int team, float x, float y,
+                 float health, float maxHealth, float rotation, boolean canBuild,
+                 String[] stackItems, int[] stackAmounts, int controllerId, String command) {
+            this.id = id; this.type = type; this.team = team; this.x = x; this.y = y;
+            this.health = health; this.maxHealth = maxHealth;
+            this.rotation = rotation; this.canBuild = canBuild;
+            this.stackItems = stackItems; this.stackAmounts = stackAmounts;
+            this.controllerId = controllerId; this.command = command;
+        }
+    }
+
+    public static final class BuildInfo {
+        public final int x, y, team;
+        public final String block;
+        public final float health, maxHealth;
+        public final boolean enabled;
+        public final float efficiency;
+        /** 库存（item 名 → 数量）。玩家选中建筑就能看到。 */
+        public final String[] items;
+        public final int[] itemAmounts;
+        /** 液体（liquid 名 → 数量）。 */
+        public final String[] liquids;
+        public final float[] liquidAmounts;
+        /** 配置值的字符串形式；null 表示无配置。 */
+        public final String config;
+        /** 是否正在施工（ConstructBlock）。 */
+        public final boolean constructing;
+        /** 正在施工时的进度 0~1。 */
+        public final float buildProgress;
+
+        BuildInfo(int x, int y, int team, String block,
+                  float health, float maxHealth, boolean enabled, float efficiency,
+                  String[] items, int[] itemAmounts,
+                  String[] liquids, float[] liquidAmounts,
+                  String config, boolean constructing, float buildProgress) {
+            this.x = x; this.y = y; this.team = team; this.block = block;
+            this.health = health; this.maxHealth = maxHealth;
+            this.enabled = enabled; this.efficiency = efficiency;
+            this.items = items; this.itemAmounts = itemAmounts;
+            this.liquids = liquids; this.liquidAmounts = liquidAmounts;
+            this.config = config; this.constructing = constructing;
+            this.buildProgress = buildProgress;
+        }
+    }
+
+    // ---------------------------------------------------------------- update
+
+    /**
+     * 由主线程每帧调用。自身不做任何跨线程同步 —— 只构造新对象后整体替换引用。
+     */
+    public static void update() {
+        try {
+            int tick = (int) Vars.state.tick;
+
+            // 注意 tick 回退：loadMap 会把 state.tick 重置为 0，而 lastHeavyTick 还留着
+            // 上一张地图的值（例如 1500）。此时 (tick - lastHeavyTick) 是负数，条件
+            // 永远不成立，快照会一直返回上一局的数据。必须把回退本身当成刷新信号。
+            boolean heavy = (lastHeavyTick < 0)
+                         || tick < lastHeavyTick
+                         || (tick - lastHeavyTick >= HEAVY_INTERVAL_TICKS);
+
+            // 情报状态机需要逐 tick 推进 —— 视野判定是按 tick 计的
+            Intel.update();
+
+            // 录像器逐 tick 推进（内部按 SNAPSHOT_INTERVAL 限流）
+            Recorder.update();
+
+            TeamInfo[] teams;
+            UnitInfo[] units;
+            BuildInfo[] builds;
+
+            if (heavy) {
+                lastHeavyTick = tick;
+                teams  = collectTeams();
+                units  = collectUnits();
+                builds = collectBuilds();
+                diffEntities(units, builds);
+            } else {
+                State prev = current;
+                teams  = prev.teams;
+                units  = prev.units;
+                builds = prev.builds;
+            }
+
+            current = new State(
+                tick,
+                Vars.state.wave,
+                Vars.state.isPlaying(),
+                Vars.state.isPaused(),
+                Vars.state.gameOver,
+                Vars.state.rules.pvp,
+                Vars.state.rules.fog,
+                Vars.world.width(),
+                Vars.world.height(),
+                teams, units, builds,
+                heavy
+            );
+        } catch (Throwable t) {
+            // 快照失败绝不能影响游戏主循环
+            AIArena.log("snapshot update failed: " + t);
+        }
+    }
+
+    private static TeamInfo[] collectTeams() {
+        TeamInfo[] out = new TeamInfo[Vars.state.teams.present.size];
+        int i = 0;
+        for (var td : Vars.state.teams.present) {
+            out[i++] = new TeamInfo(
+                td.team.id, td.team.name, td.team.isAI(), td.team.isAlive(),
+                td.cores.size, td.players.size);
+        }
+        return out;
+    }
+
+    private static UnitInfo[] collectUnits() {
+        UnitInfo[] out = new UnitInfo[mindustry.gen.Groups.unit.size()];
+        int i = 0;
+        for (mindustry.gen.Unit u : mindustry.gen.Groups.unit) {
+            if (u == null || !u.isAdded()) continue;
+
+            // 携带物
+            String[] stItems = new String[0];
+            int[] stAmts = new int[0];
+            if (u.stack != null && u.stack.amount > 0 && u.stack.item != null) {
+                stItems = new String[]{u.stack.item.name};
+                stAmts = new int[]{u.stack.amount};
+            }
+
+            // 控制器：玩家控制时给玩家 id，AI 控制时给 -1
+            int ctrl = -1;
+            var c = u.controller();
+            if (c instanceof mindustry.gen.Player p && p != null) ctrl = p.id;
+
+            // 当前指令
+            String cmd = "";
+            if (c instanceof mindustry.ai.types.CommandAI cai && cai.command != null) {
+                cmd = cai.command.name;
+            }
+
+            out[i++] = new UnitInfo(
+                u.id, u.type.name, u.team.id, u.x, u.y,
+                u.health, u.maxHealth, u.rotation, u.canBuild(),
+                stItems, stAmts, ctrl, cmd);
+        }
+        if (i == out.length) return out;
+        UnitInfo[] trimmed = new UnitInfo[i];
+        System.arraycopy(out, 0, trimmed, 0, i);
+        return trimmed;
+    }
+
+    /**
+     * 收集所有队伍的建筑。
+     *
+     * 用 TeamData.buildings 而不是 Groups.build —— 后者是为逻辑处理器准备的分组，
+     * 实测只返回了部分建筑（三个核心与一个传送带里只出现了一个）。
+     * TeamData.buildings 是引擎自己维护的每队建筑列表，覆盖完整。
+     */
+    private static BuildInfo[] collectBuilds() {
+        arc.struct.Seq<BuildInfo> list = new arc.struct.Seq<>();
+        for (var td : Vars.state.teams.present) {
+            for (mindustry.gen.Building b : td.buildings) {
+                if (b == null || b.block == null) continue;
+
+                // 库存
+                arc.struct.Seq<String> its = new arc.struct.Seq<>();
+                arc.struct.Seq<Integer> amts = new arc.struct.Seq<>();
+                if (b.items != null) {
+                    for (mindustry.type.Item it : Vars.content.items()) {
+                        int n = b.items.get(it);
+                        if (n > 0) { its.add(it.name); amts.add(n); }
+                    }
+                }
+                String[] iNames = its.toArray(String.class);
+                int[] iAmts = new int[amts.size];
+                for (int k = 0; k < iAmts.length; k++) iAmts[k] = amts.get(k);
+
+                // 液体
+                arc.struct.Seq<String> lqs = new arc.struct.Seq<>();
+                arc.struct.Seq<Float> lAmts = new arc.struct.Seq<>();
+                if (b.liquids != null) {
+                    for (mindustry.type.Liquid lq : Vars.content.liquids()) {
+                        float n = b.liquids.get(lq);
+                        if (n > 0.01f) { lqs.add(lq.name); lAmts.add(n); }
+                    }
+                }
+                String[] lNames = lqs.toArray(String.class);
+                float[] lVals = new float[lAmts.size];
+                for (int k = 0; k < lVals.length; k++) lVals[k] = lAmts.get(k);
+
+                // 配置
+                String cfg = null;
+                try { Object c = b.config(); if (c != null) cfg = String.valueOf(c); }
+                catch (Throwable ignored) { }
+
+                // 施工进度
+                boolean constructing = b instanceof mindustry.world.blocks.ConstructBlock.ConstructBuild;
+                float progress = constructing
+                    ? ((mindustry.world.blocks.ConstructBlock.ConstructBuild) b).progress
+                    : 1f;
+
+                list.add(new BuildInfo(
+                    b.tileX(), b.tileY(), b.team.id, b.block.name,
+                    b.health, b.maxHealth, b.enabled, b.efficiency,
+                    iNames, iAmts, lNames, lVals, cfg, constructing, progress));
+            }
+        }
+        return list.toArray(BuildInfo.class);
+    }
+
+    // ---------------------------------------------------------------- diff
+
+    private static final arc.struct.IntSet knownUnits = new arc.struct.IntSet();
+    private static final arc.struct.IntSet knownBuilds = new arc.struct.IntSet();
+    private static boolean diffPrimed = false;
+
+    /**
+     * 用快照差分补齐引擎事件的缺口。
+     *
+     * 为什么需要：UnitCreateEvent 只在 UnitSpawnAbility / PayloadSource /
+     * Reconstructor / UnitAssembler / UnitFactory 这五处触发 —— **核心生产单位
+     * 和直接 spawn 都不触发**。若只依赖引擎事件，AI 不会知道敌方出现了新单位。
+     *
+     * 这里只补引擎不覆盖的那两类（unitAppear / unitGone），名字刻意与引擎的
+     * unitCreate / unitDestroy 区分，避免语义混淆。
+     *
+     * 首次调用只建立基线、不产生事件，否则开局会把全图单位报一遍。
+     */
+    private static void diffEntities(UnitInfo[] units, BuildInfo[] builds) {
+        try {
+            if (!diffPrimed) {
+                knownUnits.clear();
+                knownBuilds.clear();
+                for (UnitInfo u : units) knownUnits.add(u.id);
+                for (BuildInfo b : builds) knownBuilds.add(b.x * 100000 + b.y);
+                diffPrimed = true;
+                return;
+            }
+
+            arc.struct.IntSet nowUnits = new arc.struct.IntSet();
+            for (UnitInfo u : units) {
+                nowUnits.add(u.id);
+                if (!knownUnits.contains(u.id)) {
+                    EventLog.addExternal("unitAppear", u.team, u.x, u.y,
+                        new Json.Obj().put("unit", u.id).put("type", u.type)
+                                      .put("health", u.health)
+                                      .toString().replaceAll("^\\{|\\}$", ""));
+                }
+            }
+            for (UnitInfo u : units) {
+                if (knownUnits.contains(u.id)) continue;
+                // 已在上面报过
+            }
+            // 消失的单位
+            for (var it = knownUnits.iterator(); it.hasNext; ) {
+                int id = it.next();
+                if (!nowUnits.contains(id)) {
+                    EventLog.addExternal("unitGone", -1, Float.NaN, Float.NaN,
+                        new Json.Obj().put("unit", id).toString().replaceAll("^\\{|\\}$", ""));
+                }
+            }
+            knownUnits.clear();
+            knownUnits.addAll(nowUnits);
+
+            arc.struct.IntSet nowBuilds = new arc.struct.IntSet();
+            for (BuildInfo b : builds) {
+                int key = b.x * 100000 + b.y;
+                nowBuilds.add(key);
+                if (!knownBuilds.contains(key)) {
+                    EventLog.addExternal("buildAppear", b.team, b.x * Vars.tilesize, b.y * Vars.tilesize,
+                        new Json.Obj().put("x", b.x).put("y", b.y).put("block", b.block)
+                                      .toString().replaceAll("^\\{|\\}$", ""));
+                }
+            }
+            for (var it = knownBuilds.iterator(); it.hasNext; ) {
+                int key = it.next();
+                if (!nowBuilds.contains(key)) {
+                    EventLog.addExternal("buildGone", -1, (key / 100000) * Vars.tilesize,
+                        (key % 100000) * Vars.tilesize,
+                        new Json.Obj().put("x", key / 100000).put("y", key % 100000)
+                                      .toString().replaceAll("^\\{|\\}$", ""));
+                }
+            }
+            knownBuilds.clear();
+            knownBuilds.addAll(nowBuilds);
+        } catch (Throwable t) {
+            AIArena.log("entity diff failed: " + t);
+        }
+    }
+
+    /** 换图时重置差分基线。 */
+    public static void resetDiff() {
+        knownUnits.clear();
+        knownBuilds.clear();
+        diffPrimed = false;
+    }
+
+    public static State get() { return current; }
+}
