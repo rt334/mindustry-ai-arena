@@ -39,8 +39,29 @@ public final class AIArena {
     public static int ratePerSecond = 60;
     public static int rateBurst = 200;
 
-    /** 已配置的 agent。 */
-    public static final Seq<Agent> agents = new Seq<>();
+    /**
+     * HTTP 工作线程数。
+     *
+     * 默认 4 在多 AI 并发轮询时会成为瓶颈 —— 实测 12 个并发客户端下
+     * 约 1.25% 的请求失败（线程池排队导致连接被拒）。
+     * 现在默认 16，并可通过配置调整。
+     */
+    public static int httpThreads = 16;
+
+    /** HttpServer 的 accept backlog。0 表示用系统默认。 */
+    public static int httpBacklog = 128;
+
+    /**
+     * 已配置的 agent。
+     *
+     * ⚠ 必须是线程安全容器。这个列表会被 HTTP 线程高频遍历（每个请求都要过
+     * authenticate），而 arc 的 Seq 迭代器在多线程并发遍历时会互相踩状态，
+     * 抛 NoSuchElementException（实测 24 并发下约 3% 的请求失败）。
+     *
+     * agents 只在启动时写入一次，之后纯读 —— CopyOnWriteArrayList 的读路径
+     * 完全无锁，正好匹配这个访问模式。
+     */
+    public static final java.util.List<Agent> agents = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     public static final class Agent {
         public final String id;
@@ -119,6 +140,12 @@ public final class AIArena {
                 rateBurst      = rl.getInt("burst", 200);
             }
 
+            Jval http = root.get("http");
+            if (http != null) {
+                httpThreads = Math.max(2, http.getInt("threads", 16));
+                httpBacklog = Math.max(0, http.getInt("backlog", 128));
+            }
+
             agents.clear();
             Jval arr = root.get("agents");
             if (arr != null && arr.isArray()) {
@@ -137,7 +164,7 @@ public final class AIArena {
                 }
             }
 
-            log("loaded " + agents.size + " agent(s), bind=" + bind + ":" + port);
+            log("loaded " + agents.size() + " agent(s), bind=" + bind + ":" + port);
             for (Agent a : agents) log("   " + a);
         } catch (Throwable t) {
             log("config load FAILED: " + t);

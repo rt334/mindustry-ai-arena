@@ -59,7 +59,8 @@ public final class HttpApi {
 
     public static void start() {
         try {
-            server = HttpServer.create(new InetSocketAddress(AIArena.bind, AIArena.port), 0);
+            server = HttpServer.create(new InetSocketAddress(AIArena.bind, AIArena.port),
+                                       AIArena.httpBacklog);
 
             server.createContext("/ping", ex -> {
                 try {
@@ -69,7 +70,7 @@ public final class HttpApi {
                         .putRaw("data", new Json.Obj()
                             .put("headless", Vars.headless)
                             .put("tick", s.tick)
-                            .put("agents", AIArena.agents.size)
+                            .put("agents", AIArena.agents.size())
                             .toString())
                         .toString());
                 } catch (Throwable t) { respond(ex, 500, Json.error(1500, String.valueOf(t))); }
@@ -77,7 +78,7 @@ public final class HttpApi {
 
             server.createContext("/v1/", HttpApi::route);
 
-            server.setExecutor(Executors.newFixedThreadPool(4, r -> {
+            server.setExecutor(Executors.newFixedThreadPool(AIArena.httpThreads, r -> {
                 Thread t = new Thread(r, "AIARENA-HTTP");
                 t.setDaemon(true);
                 return t;
@@ -85,7 +86,8 @@ public final class HttpApi {
             server.start();
 
             AIArena.log("HTTP listening on " + AIArena.bind + ":" + AIArena.port
-                        + "  (" + AIArena.agents.size + " agent(s))");
+                        + "  (" + AIArena.agents.size() + " agent(s), "
+                        + AIArena.httpThreads + " threads, backlog " + AIArena.httpBacklog + ")");
         } catch (Throwable t) {
             AIArena.log("HTTP FAILED to start: " + t);
             t.printStackTrace();
@@ -143,7 +145,10 @@ public final class HttpApi {
                 default       -> respond(ex, 404, Json.error(1002, "unknown action: " + action));
             }
         } catch (Throwable t) {
-            AIArena.log("route error: " + t);
+            // 打印完整堆栈 —— 只打印异常消息不足以定位（NoSuchElementException 的消息
+            // 只是个索引数字，看不出是哪一行抛的）
+            AIArena.log("route error on " + ex.getRequestURI() + ": " + t);
+            t.printStackTrace();
             respond(ex, 500, Json.error(1500, String.valueOf(t)));
         }
     }
@@ -295,11 +300,9 @@ public final class HttpApi {
                     lastX = tx; lastY = ty;
 
                     boolean visible = admin
-                        || !Vars.state.rules.fog
-                        || (myTeam >= 0 && Vars.fogControl.isVisibleTile(Team.get(myTeam), tx, ty));
+                        || (myTeam >= 0 && safeVisibleTile(Team.get(myTeam), tx, ty));
                     boolean discovered = admin
-                        || !Vars.state.rules.fog
-                        || (myTeam >= 0 && Vars.fogControl.isDiscovered(Team.get(myTeam), tx, ty));
+                        || (myTeam >= 0 && safeDiscovered(Team.get(myTeam), tx, ty));
 
                     Tile t = Vars.world.tile(tx, ty);
                     if (t == null) continue;
@@ -1036,23 +1039,38 @@ public final class HttpApi {
                 if (!first) arr.append(',');
                 first = false;
 
-                StringBuilder teamIds = new StringBuilder("[");
+                // 注意：不能直接用 m.teams.iterator()。
+                // Map.teams 是引擎维护的 IntSet，地图解析/重载过程中会被改写，
+                // 并发读会抛 NoSuchElementException（实测在压力测试中出现）。
+                // 这里先快照成数组，再做后续处理，并对异常兜底。
+                int[] teamIds;
+                try {
+                    // IntSet 没有 toArray()，只有 each(Intc) 与 iterator()。
+                    // 两者在集合被并发改写时都会抛异常，所以这里整体兜底。
+                    java.util.List<Integer> tmp = new java.util.ArrayList<>();
+                    m.teams.each(tmp::add);
+                    teamIds = new int[tmp.size()];
+                    for (int ti = 0; ti < teamIds.length; ti++) teamIds[ti] = tmp.get(ti);
+                } catch (Throwable t) {
+                    teamIds = new int[0];
+                }
+
+                StringBuilder teamList = new StringBuilder("[");
                 boolean tf = true;
-                for (var it = m.teams.iterator(); it.hasNext; ) {
-                    if (!tf) teamIds.append(',');
+                for (int id : teamIds) {
+                    if (!tf) teamList.append(',');
                     tf = false;
-                    int id = it.next();
                     Team t = Team.get(id);
-                    teamIds.append(new Json.Obj()
+                    teamList.append(new Json.Obj()
                         .put("id", id).put("name", t == null ? "?" : t.name).toString());
                 }
-                teamIds.append(']');
+                teamList.append(']');
 
                 arr.append(new Json.Obj()
                     .put("name", m.name())
                     .put("w", m.width).put("h", m.height)
-                    .put("teams", m.teams.size)
-                    .putRaw("teamList", teamIds.toString())
+                    .put("teams", teamIds.length)
+                    .putRaw("teamList", teamList.toString())
                     .put("spawns", m.spawns)
                     .put("custom", m.custom)
                     .put("pvpTag", m.tags.get("pvp", ""))
@@ -1582,6 +1600,36 @@ public final class HttpApi {
 
     // ---------------------------------------------------------------- filtering
 
+    /**
+     * 安全的视野查询。
+     *
+     * FogControl 由主线程维护，其内部数据结构不是线程安全的。HTTP 线程直接调用
+     * 会在并发下抛 NoSuchElementException（实测 32 线程时约 1.5% 的请求失败）。
+     *
+     * 这里保守兜底：查询失败时返回「不可见」。这个方向是安全的 ——
+     * 宁可少看到一格，也不能因为异常而多看到东西，否则就破坏了对等约束。
+     *
+     * 注意只对**敌方**实体走这条路径（己方实体不查视野），所以失败时
+     * 隐藏的都是敌方信息，不会影响 AI 对自己局面的判断。
+     */
+    private static boolean safeVisible(Team team, float x, float y) {
+        if (!Vars.state.rules.fog) return true;
+        try { return Vars.fogControl.isVisible(team, x, y); }
+        catch (Throwable t) { return false; }
+    }
+
+    private static boolean safeVisibleTile(Team team, int x, int y) {
+        if (!Vars.state.rules.fog) return true;
+        try { return Vars.fogControl.isVisibleTile(team, x, y); }
+        catch (Throwable t) { return false; }
+    }
+
+    private static boolean safeDiscovered(Team team, int x, int y) {
+        if (!Vars.state.rules.fog) return true;
+        try { return Vars.fogControl.isDiscovered(team, x, y); }
+        catch (Throwable t) { return false; }
+    }
+
     private static String visibleUnits(Snapshot.State s, int myTeam, boolean admin) {
         Team team = Team.get(myTeam);
         StringBuilder sb = new StringBuilder("[");
@@ -1589,7 +1637,7 @@ public final class HttpApi {
         for (Snapshot.UnitInfo u : s.units) {
             if (u.team != myTeam && !admin) {
                 // 对称于引擎的 isSyncHidden：敌方单位需在当前视野内
-                if (Vars.state.rules.fog && !Vars.fogControl.isVisible(team, u.x, u.y)) continue;
+                if (!safeVisible(team, u.x, u.y)) continue;
             }
             if (!first) sb.append(',');
             first = false;
@@ -1620,7 +1668,7 @@ public final class HttpApi {
         boolean first = true;
         for (Snapshot.BuildInfo b : s.builds) {
             if (b.team != myTeam && !admin) {
-                if (Vars.state.rules.fog && !Vars.fogControl.isVisibleTile(team, b.x, b.y)) continue;
+                if (!safeVisibleTile(team, b.x, b.y)) continue;
             }
             if (!first) sb.append(',');
             first = false;

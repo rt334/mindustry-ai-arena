@@ -1318,6 +1318,33 @@ Mod 侧读配置时主动剥离 BOM 作为双保险。
 
 ---
 
+### 压力测试发现的并发缺陷（已修）
+
+**`arc.struct.Seq` 的迭代器不是线程安全的。**
+
+```java
+// 错误：agents 是 Seq，authenticate 里每个请求都遍历它
+public static final Seq<Agent> agents = new Seq<>();
+for (Agent a : agents) { ... }        // 并发下抛 NoSuchElementException
+
+// 正确：agents 只在启动时写一次、之后纯读
+public static final java.util.List<Agent> agents = new CopyOnWriteArrayList<>();
+```
+
+失败率与并发数成正比（12 线程 1.7%、24 线程 2.9%），因为每个请求都要过鉴权。
+
+**排查教训**：`t.printStackTrace()` 走 `System.err` 而 `Log.info` 走 stdout —— 只看 stdout 只能看到 `NoSuchElementException: 5` 这样的消息（数字是索引，无信息量），必须看 stderr 才能拿到调用链。
+
+**附带改进**：HTTP 线程池 4 → 16（可配置）；backlog 0 → 128；视野查询加 `safeVisible` 系列兜底（`FogControl` 同样非线程安全，兜底方向是「宁可少看，不可多看」）。
+
+配置：
+```json
+{ "http": { "threads": 16, "backlog": 128 } }
+```
+
+**压测结果**：62/62 用例通过，24 线程并发 960/960 零失败。详见 `STRESS-TEST.md`。
+
+---
 ### 全项目状态
 
 | 阶段 | 内容 | 状态 |

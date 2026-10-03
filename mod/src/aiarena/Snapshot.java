@@ -264,7 +264,17 @@ public final class Snapshot {
     private static BuildInfo[] collectBuilds() {
         arc.struct.Seq<BuildInfo> list = new arc.struct.Seq<>();
         for (var td : Vars.state.teams.present) {
-            for (mindustry.gen.Building b : td.buildings) {
+            // 对 TeamData.buildings 做防御性遍历：这是引擎维护的 Seq，
+            // 建筑在建造/摧毁过程中会被增删。虽然快照在主线程跑，但同一个
+            // tick 内引擎也可能在别处改动它，越界访问会抛异常。
+            int n;
+            try { n = td.buildings.size; }
+            catch (Throwable t) { continue; }
+
+            for (int bi = 0; bi < n; bi++) {
+                mindustry.gen.Building b;
+                try { b = td.buildings.get(bi); }
+                catch (Throwable t) { break; }
                 if (b == null || b.block == null) continue;
 
                 // 库存
@@ -272,8 +282,8 @@ public final class Snapshot {
                 arc.struct.Seq<Integer> amts = new arc.struct.Seq<>();
                 if (b.items != null) {
                     for (mindustry.type.Item it : Vars.content.items()) {
-                        int n = b.items.get(it);
-                        if (n > 0) { its.add(it.name); amts.add(n); }
+                        int cnt = b.items.get(it);
+                        if (cnt > 0) { its.add(it.name); amts.add(cnt); }
                     }
                 }
                 String[] iNames = its.toArray(String.class);
@@ -285,8 +295,8 @@ public final class Snapshot {
                 arc.struct.Seq<Float> lAmts = new arc.struct.Seq<>();
                 if (b.liquids != null) {
                     for (mindustry.type.Liquid lq : Vars.content.liquids()) {
-                        float n = b.liquids.get(lq);
-                        if (n > 0.01f) { lqs.add(lq.name); lAmts.add(n); }
+                        float lv = b.liquids.get(lq);
+                        if (lv > 0.01f) { lqs.add(lq.name); lAmts.add(lv); }
                     }
                 }
                 String[] lNames = lqs.toArray(String.class);
