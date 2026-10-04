@@ -366,3 +366,17 @@ b = arena.poll_until(lambda: arena.building_at(x, y), timeout=90)
 pwsh -File live-match.ps1                 # 起一局
 python skill/scripts/arena.py --agent alpha --token <TOKEN>
 ```
+
+---
+
+## 目标可行性
+
+**[`FEASIBILITY.md`](FEASIBILITY.md)** —— 动手铺产线**之前**先做的比大小：
+
+1. 从引擎源码取配方，算每个目标的原料需求
+2. 从全图普查取原料的地质上限
+3. 两者相减，有缺口就停下报告
+
+实测教训：`veins` 图上「铜铅硅钛石墨各 +5/s」**不可能同时达成** ——
+硅和石墨都要煤，合计需煤 15/s，而全图煤矿机上限只有 9.79/s。
+这个比大小只需要一行算术，却在铺了十几轮带子之后才做。
