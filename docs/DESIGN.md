@@ -977,7 +977,7 @@ P4 操作 API      P6 回放
 
 ### P0 · 技术验证（Spike）—— ✅ 已完成
 
-**结论：全部通过。详细报告见 [`P0-VERIFICATION.md`](P0-VERIFICATION.md)。**
+**结论：全部通过。详细报告见 [`P0-VERIFICATION.md`](phases/P0-VERIFICATION.md)。**
 
 | # | 待验证 | 结果 |
 |---|---|---|
@@ -1017,7 +1017,7 @@ shadow.remove();                       // 否则会留在 Groups.player
 
 ### P1 · 最简闭环 —— ✅ 已完成
 
-**结论：链路全部打通。详见 [`P1-IMPLEMENTATION.md`](P1-IMPLEMENTATION.md)。**
+**结论：链路全部打通。详见 [`P1-IMPLEMENTATION.md`](phases/P1-IMPLEMENTATION.md)。**
 
 **交付**（`mod/src/aiarena/`，约 1,300 行）：
 
@@ -1097,7 +1097,7 @@ setup 加载地图后自动检测自带核心的队伍（排除 `derelict`），
 
 ### P2 · 对等约束 —— ✅ 已完成
 
-**结论：11 条约束全部落地，其中唯一需自实现的「指挥范围」已实测生效。详见 [`P2-IMPLEMENTATION.md`](P2-IMPLEMENTATION.md)。**
+**结论：11 条约束全部落地，其中唯一需自实现的「指挥范围」已实测生效。详见 [`P2-IMPLEMENTATION.md`](phases/P2-IMPLEMENTATION.md)。**
 
 **新增交付**：`Shadow.java`（影子 Player 池）、`Commander.java`（指挥 + 范围约束）、`Intel.java`（核心数据确认状态机）。
 
@@ -1145,7 +1145,7 @@ move 到视野外 (5,5)    → {"ok":false,"code":1005,
 
 ### P3 · 信息 API —— ✅ 已完成
 
-**结论：信息 API 完整，事件流可用且遵守视野约束。详见 [`P3-IMPLEMENTATION.md`](P3-IMPLEMENTATION.md)。**
+**结论：信息 API 完整，事件流可用且遵守视野约束。详见 [`P3-IMPLEMENTATION.md`](phases/P3-IMPLEMENTATION.md)。**
 
 **字段补全**：
 
@@ -1189,7 +1189,7 @@ GET /v1/{agent}/events?since=<seq>&limit=<n>
 
 ### P4 · 操作 API —— ✅ 已完成
 
-**结论：操作 API 完整，批量建造端到端实测通过（40 个方块全部落地）。详见 [`P4-IMPLEMENTATION.md`](P4-IMPLEMENTATION.md)。**
+**结论：操作 API 完整，批量建造端到端实测通过（40 个方块全部落地）。详见 [`P4-IMPLEMENTATION.md`](phases/P4-IMPLEMENTATION.md)。**
 
 **形状批量**：
 
@@ -1229,7 +1229,7 @@ spawn mono → {"message":"spawned mono id=235 at tile(61,104) pop=2/24"}
 
 ### P5 · 观战与裁判 —— ✅ 已完成
 
-**结论：服务器侧视角切换与裁判特权完整实测；客户端观察者 Mod 编译通过。详见 [`P5-IMPLEMENTATION.md`](P5-IMPLEMENTATION.md)。**
+**结论：服务器侧视角切换与裁判特权完整实测；客户端观察者 Mod 编译通过。详见 [`P5-IMPLEMENTATION.md`](phases/P5-IMPLEMENTATION.md)。**
 
 **服务器侧**：所有只读端点支持 `view` 参数
 
@@ -1261,7 +1261,7 @@ referee view=1   → team=1，只看到 sharded 的核心（2000×10）
 
 ### P6 · 回放 —— 服务器侧 ✅ / 客户端回放待做
 
-**服务器侧已完整实现并实测。详见 [`P7-IMPLEMENTATION.md`](P7-IMPLEMENTATION.md) 第 7 节。**
+**服务器侧已完整实现并实测。详见 [`P7-IMPLEMENTATION.md`](phases/P7-IMPLEMENTATION.md) 第 7 节。**
 
 ```
 POST /v1/{admin}/record?action=start&label=veins
@@ -1280,7 +1280,7 @@ GET  /v1/{admin}/record?action=download&name=<file>
 
 ### P7 · 编排与场景 —— ✅ 已完成
 
-**结论：验收标准达成 —— `.\start-arena.ps1 -Agents 4 -Map passage` 起一局，四个 AI 各自就位。详见 [`P7-IMPLEMENTATION.md`](P7-IMPLEMENTATION.md)。**
+**结论：验收标准达成 —— `.\start-arena.ps1 -Agents 4 -Map passage` 起一局，四个 AI 各自就位。详见 [`P7-IMPLEMENTATION.md`](phases/P7-IMPLEMENTATION.md)。**
 
 ```powershell
 .\start-arena.ps1                              默认 2 个 AI，veins 地图
@@ -1384,7 +1384,7 @@ public static final java.util.List<Agent> agents = new CopyOnWriteArrayList<>();
 
 ### P0 已完成 ✅
 
-**七项全部有答案，详见 [`P0-VERIFICATION.md`](P0-VERIFICATION.md)。** 唯一需要留意的实测结果是「影子 Player 会进入 `Groups.player`（但 `players.size` 不受影响）」，处理方式为按需创建、用后 `remove()`。
+**七项全部有答案，详见 [`P0-VERIFICATION.md`](phases/P0-VERIFICATION.md)。** 唯一需要留意的实测结果是「影子 Player 会进入 `Groups.player`（但 `players.size` 不受影响）」，处理方式为按需创建、用后 `remove()`。
 
 ### 后续阶段的风险项
 

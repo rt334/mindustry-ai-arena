@@ -1,6 +1,6 @@
 # AI 竞技场 · P0 技术验证报告
 
-> 对应 `DESIGN.md` 第 9 节 P0。验证方式：真实 headless 服务器 + 验证 Mod，非纸面推导。
+> 对应 `../DESIGN.md` 第 9 节 P0。验证方式：真实 headless 服务器 + 验证 Mod，非纸面推导。
 >
 > **结论：P0 全部通过。架构成立，可以进入 P1。**
 
@@ -61,7 +61,7 @@
 [AIVERIFY]       Core.app = arc.backend.headless.HeadlessApplication
 ```
 
-**`Vars.player = null` 实测确认** —— 印证了 DESIGN.md 的判断：服务器侧没有本地玩家，所有需要 `Player` 参数的引擎方法必须用影子 Player。
+**`Vars.player = null` 实测确认** —— 印证了 `../DESIGN.md` 的判断：服务器侧没有本地玩家，所有需要 `Player` 参数的引擎方法必须用影子 Player。
 
 ### 2.2 `Core.app.post` 时延
 
@@ -145,7 +145,7 @@ GET /ping   → {"ok":true,"headless":true,"tick":0}
 
 ---
 
-## 4. 对 DESIGN.md 的修正
+## 4. 对 `../DESIGN.md` 的修正
 
 ### 4.1 影子 Player 需要「用后即弃」或接受其可见性
 
@@ -198,7 +198,7 @@ Vars.state.set(GameState.State.playing);
 
 ```
 C:\dsh\ai-arena\
-  DESIGN.md                     设计文档
+  ../DESIGN.md                设计文档
   P0-VERIFICATION.md            本报告
   verify\
     mod.hjson                   验证 Mod 元信息

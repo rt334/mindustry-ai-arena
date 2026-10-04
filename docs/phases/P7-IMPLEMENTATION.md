@@ -1,6 +1,6 @@
 # AI 竞技场 · P7 实现报告
 
-> 对应 `DESIGN.md` 第 9 节 P7。目标：一条命令开一局。
+> 对应 `../DESIGN.md` 第 9 节 P7。目标：一条命令开一局。
 >
 > **结论：验收标准达成 —— `.\start-arena.ps1 -Agents 4 -Map passage` 起一局，四个 AI 各自就位。**
 
@@ -135,7 +135,7 @@ Jval root = Jval.read(raw);
 
 ## 5. 验收对照
 
-DESIGN.md P7 的验收标准：
+`../DESIGN.md` P7 的验收标准：
 
 > `.\start-arena.ps1 -agents 4` 起一局，四个 AI 各自连上开始对抗。
 
@@ -172,7 +172,7 @@ DESIGN.md P7 的验收标准：
 
 ```
 C:\dsh\ai-arena\
-  DESIGN.md                  设计文档（含 9 项引擎发现）
+  ../DESIGN.md               设计文档（含 9 项引擎发现）
   P0-VERIFICATION.md         P0 报告
   P1-IMPLEMENTATION.md       P1 报告
   P2-IMPLEMENTATION.md       P2 报告

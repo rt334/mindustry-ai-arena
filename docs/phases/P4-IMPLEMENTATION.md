@@ -1,6 +1,6 @@
 # AI 竞技场 · P4 实现报告
 
-> 对应 `DESIGN.md` 第 9 节 P4。目标：AI 拥有完整的「手」。
+> 对应 `../DESIGN.md` 第 9 节 P4。目标：AI 拥有完整的「手」。
 >
 > **结论：操作 API 完整，批量建造端到端实测通过（40 个方块全部落地）。**
 
@@ -39,7 +39,7 @@ POST /queue?clear=true                                      清空建造队列
 
 ## 3. 批量不是「直接改一片世界」
 
-设计约束（DESIGN.md P4）写明「全部操作都要过 P2 的校验链，没有旁路」。因此批量建造的实现是：
+设计约束（`../DESIGN.md` P4）写明「全部操作都要过 P2 的校验链，没有旁路」。因此批量建造的实现是：
 
 ```java
 for (Point2 p : points) {
@@ -130,7 +130,7 @@ public void requestSpawn(Player player){
 
 ---
 
-## 6. 对 DESIGN.md 的修正
+## 6. 对 `../DESIGN.md` 的修正
 
 | 项 | 修正 |
 |---|---|

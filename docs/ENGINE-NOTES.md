@@ -351,7 +351,7 @@ public boolean acceptItem(Building source, Item item){
 
 ## 十三、走向混淆：`r1` 是 +y，而 +y 是**南**
 
-**`rotation` 的 y 轴容易记反。** 一局实机验证后的约定（见 `_work/REVIEW-ADDENDUM.md` 第一节）：
+**`rotation` 的 y 轴容易记反。** 一局实机验证后的约定（见 `reviews/REVIEW-ADDENDUM.md` 第一节）：
 
 ```
 0 = 东 (x 增大)

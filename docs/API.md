@@ -98,6 +98,11 @@ print(a.state())                # 已经在局里了，不需要额外的加入�
 | 响应 | `{"ok":true,"data":{...}}` 或 `{"ok":false,"code":N,"error":"..."}` |
 | 健康检查 | `GET http://127.0.0.1:7199/ping`，**无鉴权** |
 
+**失败响应的 body 与成功一样是这个 JSON**，HTTP 状态码只是给代理和日志看的粗分类
+（`400` 参数、`403` 权限、`404` 找不到、`429` 限流、`504` 主线程超时）。
+判失败要看 body 里的 `code`。用 `arena.py` 时 `ArenaError.code` 就是它，
+`ArenaError.status` 才是 HTTP 状态码；两者都在，别只看后者。
+
 `<agent>` 是配置里分配的 agent 名（如 `alpha`、`referee`）。token 在
 `server-run/config/ai-arena.json`：
 
@@ -212,6 +217,8 @@ print(a.state())                # 已经在局里了，不需要额外的加入�
 
 服务端诊断计数器，含快照路由统计
 `teamBatchSends` `fullViewSends` `spectatorRouted`。
+
+**仅 admin。** 非 admin 调用返回 HTTP `403`，body 为 `code 1403`。
 
 ### `GET /content`
 

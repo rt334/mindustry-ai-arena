@@ -1,6 +1,6 @@
 # AI 竞技场 · P3 实现报告
 
-> 对应 `DESIGN.md` 第 9 节 P3。目标：AI 拥有完整的「眼睛」。
+> 对应 `../DESIGN.md` 第 9 节 P3。目标：AI 拥有完整的「眼睛」。
 >
 > **结论：信息 API 完整，事件流可用且遵守视野约束。**
 
@@ -182,7 +182,7 @@ private static boolean visible(Ev ev, Team viewer) {
 
 ---
 
-## 6. 对 DESIGN.md 的修正
+## 6. 对 `../DESIGN.md` 的修正
 
 | 项 | 修正 |
 |---|---|

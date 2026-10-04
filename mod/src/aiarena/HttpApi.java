@@ -4001,16 +4001,35 @@ public final class HttpApi {
         }
     }
 
-    /** 从错误码推 HTTP 状态，便于 AI 侧按状态码分流。 */
+    /**
+     * 从错误码推 HTTP 状态，便于 AI 侧按状态码分流。
+     *
+     * 用解析而不是 `contains` 子串匹配 —— 子串匹配会把错误消息里偶然出现的
+     * `"code":1005` 当成分错码。缺映射的码一律 400：调用方**必须**以 body 里的
+     * `code` 为准，HTTP 状态只是给代理 / 日志看的粗分类。
+     */
     private static int statusFor(String json) {
-        if (json.contains("\"code\":1001")) return 400;
-        if (json.contains("\"code\":1002")) return 404;
-        if (json.contains("\"code\":1003")) return 400;
-        if (json.contains("\"code\":1004")) return 429;
-        if (json.contains("\"code\":1005")) return 403;
-        if (json.contains("\"code\":1006")) return 410;
-        if (json.contains("\"code\":1007")) return 504;
-        return 400;
+        return switch (codeOf(json)) {
+            case 1001, 1003 -> 400;
+            case 1002 -> 404;
+            case 1004 -> 429;
+            case 1005, 1403 -> 403;     // forbidden：admin-only 端点、token 与队伍不符
+            case 1006 -> 410;
+            case 1007 -> 504;
+            default -> 400;
+        };
+    }
+
+    /** 取响应里第一个 `"code":N` 的 N；取不到返回 -1。 */
+    private static int codeOf(String json) {
+        if (json == null) return -1;
+        int i = json.indexOf("\"code\":");
+        if (i < 0) return -1;
+        int j = i + 7, k = j;
+        while (k < json.length() && Character.isDigit(json.charAt(k))) k++;
+        if (k == j) return -1;
+        try { return Integer.parseInt(json.substring(j, k)); }
+        catch (NumberFormatException e) { return -1; }
     }
 
     private static void respond(HttpExchange ex, int status, String json) {

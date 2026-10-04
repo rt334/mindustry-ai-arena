@@ -27,7 +27,7 @@ AI 在任何时刻看到的，必须与一个真人玩家在同队时看到的�
 就拿到玩家要靠试验才能得到的答案。**该知道的东西，去游戏里查。**
 
 引擎与接口实现层的说明（供维护者参考，非 agent 读物）见仓库的
-`ENGINE-NOTES.md`。
+`docs/ENGINE-NOTES.md`。
 
 - 项目根：`C:\dsh\ai-arena`
 - 服务端运行目录：`C:\dsh\ai-arena\server-run`（含 token 配置，**不入版本控制**）

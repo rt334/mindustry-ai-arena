@@ -1,6 +1,6 @@
 # AI 竞技场 · P5 实现报告
 
-> 对应 `DESIGN.md` 第 9 节 P5。目标：人能看直播。
+> 对应 `../DESIGN.md` 第 9 节 P5。目标：人能看直播。
 >
 > **结论：服务器侧视角切换与裁判特权完整实测通过；客户端观察者 Mod 编译通过。**
 
@@ -86,7 +86,7 @@ GET /v1/{agent}/observe
 
 ## 3. 为什么观战不走引擎实体同步
 
-DESIGN.md P5 里记的风险：
+`../DESIGN.md` P5 里记的风险：
 
 > 若试图让裁判走引擎的实体同步（`writeCustomEntitySnapshot`），可能与 `hiddenIds` 机制打架（先删后建导致闪烁）。**建议裁判直接走 HTTP 数据源**，绕开引擎同步。
 
@@ -154,7 +154,7 @@ if (Math.abs(scroll) > 0f) Vars.renderer.scaleCamera(scroll);
 
 ---
 
-## 6. 对 DESIGN.md 的修正
+## 6. 对 `../DESIGN.md` 的修正
 
 | 项 | 修正 |
 |---|---|

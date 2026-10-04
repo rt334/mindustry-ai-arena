@@ -1,6 +1,6 @@
 # AI 竞技场 · P1 实现报告
 
-> 对应 `DESIGN.md` 第 9 节 P1。目标：打通「鉴权 → HTTP → 主线程 → 校验 → 引擎流水线」的完整链路。
+> 对应 `../DESIGN.md` 第 9 节 P1。目标：打通「鉴权 → HTTP → 主线程 → 校验 → 引擎流水线」的完整链路。
 >
 > **结论：链路全部打通，方块经 HTTP 下令后真正落地。P1 验收标准达成。**
 
@@ -86,7 +86,7 @@ alpha 的 /state（fog=true）:
 
 ## 3. 实现要点
 
-### 3.1 读写分离（DESIGN.md 5.2）
+### 3.1 读写分离（`../DESIGN.md` 5.2）
 
 ```
 读 (state)   HTTP 线程直接读 Snapshot 的 volatile 引用 ── 零跨线程、零阻塞
@@ -119,7 +119,7 @@ token 缺失时自动生成 48 位 hex（`SecureRandom`）并写回配置，**�
 ### 3.4 建造路径
 
 ```java
-// Actor.place() 的三步，与 DESIGN.md 4.5 一致
+// Actor.place() 的三步，与 `../DESIGN.md` 4.5 一致
 1. Vars.fogControl.isVisibleTile(team, x, y)        ← 对称于「玩家点得到」
 2. 找 canBuild() 的单位
 3. builder.addBuild(new BuildPlan(x, y, rotation, block, config))
@@ -388,7 +388,7 @@ Core.app.post(() -> {
 
 ---
 
-## 6. 对 DESIGN.md 的修正
+## 6. 对 `../DESIGN.md` 的修正
 
 | 项 | 修正 |
 |---|---|

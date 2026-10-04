@@ -172,7 +172,7 @@ JSON Lines —— 流式追加、崩溃时已写部分仍可解析、客户端�
 
 **当前结果：62/62 通过，24 线程并发 960/960 零失败。**
 
-详见 [`STRESS-TEST.md`](STRESS-TEST.md) —— 其中记录了一个压测发现的真实并发缺陷：
+详见 [`STRESS-TEST.md`](docs/STRESS-TEST.md) —— 其中记录了一个压测发现的真实并发缺陷：
 `arc.struct.Seq` 的迭代器不是线程安全的，而鉴权路径每个请求都要遍历它。
 
 ---
@@ -246,14 +246,26 @@ private static String[] pvpMaps = {"veins", "glacier", "passage"};
 ## 目录结构
 
 ```
-DESIGN.md                设计文档（含全部引擎发现与源码引用）
-P0-VERIFICATION.md       技术验证报告（7 项原型验证）
-P1-IMPLEMENTATION.md     最简闭环
-P2-IMPLEMENTATION.md     对等约束
-P3-IMPLEMENTATION.md     信息 API
-P4-IMPLEMENTATION.md     操作 API
-P5-IMPLEMENTATION.md     观战与裁判
-P7-IMPLEMENTATION.md     编排（含 P6 录像摘要）
+docs/                    文档
+  DESIGN.md              设计文档（含全部引擎发现与源码引用）
+  API.md                 接口手册
+  ENGINE-NOTES.md        引擎层说明（维护者文档）
+  FEASIBILITY.md         目标可行性评估
+  STRESS-TEST.md         压力测试报告
+  PROMPTS.md             提示词与工作流约定
+  phases/                P0~P7 分阶段实现报告
+    P0-VERIFICATION.md   技术验证（7 项原型验证）
+    P1-IMPLEMENTATION.md 最简闭环
+    P2-IMPLEMENTATION.md 对等约束
+    P3-IMPLEMENTATION.md 信息 API
+    P4-IMPLEMENTATION.md 操作 API
+    P5-IMPLEMENTATION.md 观战与裁判
+    P7-IMPLEMENTATION.md 编排（含 P6 录像摘要）
+  reviews/               产线攻坚复盘与接口提案
+    REPORT.md            产线攻坚报告
+    DEBUG-LOG.md         实战调试复盘
+    FEATURE-REQUESTS.md  接口层改进提案
+    REVIEW-ADDENDUM.md   对提案的核对与增补
 
 start-arena.ps1          一局启动脚本
 
@@ -322,13 +334,13 @@ MIT
 
 ## 接口文档与 Skill
 
-- **[`API.md`](API.md)** —— 接口手册：起局、鉴权、接口表、观战端、故障速查。
-- **[`ENGINE-NOTES.md`](ENGINE-NOTES.md)** —— 引擎层说明（维护者文档）：坐标系与朝向、
+- **[`API.md`](docs/API.md)** —— 接口手册：起局、鉴权、接口表、观战端、故障速查。
+- **[`ENGINE-NOTES.md`](docs/ENGINE-NOTES.md)** —— 引擎层说明（维护者文档）：坐标系与朝向、
   邻近判定、三个已修复的引擎缺陷。
 - **[`skill/`](skill/)** —— 可安装的 Skill（`SKILL.md` + `scripts/`）。
   装法：把 `skill/` 内容放到 `%USERPROFILE%\.dsh\skills\ai-arena\`。
 
-**`API.md` 与 `skill/` 刻意不含任何游戏内事实** —— 不写矿脉分布、方块参数、配方、
+**`docs/API.md` 与 `skill/` 刻意不含任何游戏内事实** —— 不写矿脉分布、方块参数、配方、
 地图结构。理由见下。
 
 ### 公平竞技
@@ -339,7 +351,7 @@ MIT
 往里塞游戏内情等于让它在开局前就拿到玩家要靠试验才能得到的答案。
 所以接口文档只说「怎么调」，不说「会看到什么」。
 
-引擎实现层的知识归 `ENGINE-NOTES.md`，那是维护者文档，不是 agent 读物。
+引擎实现层的知识归 `docs/ENGINE-NOTES.md`，那是维护者文档，不是 agent 读物。
 
 ### 禁止一切等待
 
@@ -371,7 +383,7 @@ python skill/scripts/arena.py --agent alpha --token <TOKEN>
 
 ## 目标可行性
 
-**[`FEASIBILITY.md`](FEASIBILITY.md)** —— 动手铺产线**之前**先做的比大小：
+**[`FEASIBILITY.md`](docs/FEASIBILITY.md)** —— 动手铺产线**之前**先做的比大小：
 
 1. 从引擎源码取配方，算每个目标的原料需求
 2. 从全图普查取原料的地质上限

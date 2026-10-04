@@ -29,10 +29,19 @@ import urllib.request
 
 
 class ArenaError(Exception):
-    def __init__(self, code, message):
+    """接口层错误。
+
+    `code` 是面板错误码（如 1403），`status` 是对应的 HTTP 状态码（如 403）。
+    两者都要留着：只看 HTTP 状态会把「权限不足」和「参数非法」混成一句
+    `HTTP 400`，定位不到真正的原因。`body` 保留原始响应文本。
+    """
+
+    def __init__(self, code, message, status=None, body=None):
         super().__init__(f"[{code}] {message}")
         self.code = code
         self.message = message
+        self.status = status
+        self.body = body
 
 
 class Arena:
@@ -49,6 +58,16 @@ class Arena:
 
     # ---------------------------------------------------------------- 传输
 
+    @staticmethod
+    def _error(payload, fallback_code=-1, fallback_msg=None):
+        """从服务端错误 JSON 构造 ArenaError；字段缺失时退回状态码描述。"""
+        payload = payload or {}
+        return ArenaError(
+            payload.get("code", fallback_code),
+            payload.get("error") or payload.get("message")
+            or fallback_msg or f"HTTP {fallback_code}",
+        )
+
     def _call(self, path, params=None, method="GET", retry=True):
         url = f"{self.base}/{path}"
         if params:
@@ -62,16 +81,30 @@ class Arena:
                 req.add_header("Authorization", f"Bearer {self.token}")
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     body = json.loads(resp.read().decode("utf-8"))
-                # 4xx 是调用方的错，重试没意义 —— 立刻抛
+                # 服务端可以用 200 带 ok:false（少见，但契约允许）
                 if not body.get("ok", False):
-                    raise ArenaError(body.get("code", -1), body.get("error", "?"))
+                    raise self._error(body)
                 return body.get("data")
             except ArenaError:
                 raise
             except urllib.error.HTTPError as e:
+                # urllib 把非 2xx 抛成异常，但服务端**仍然在 body 里给了完整
+                # 错误 JSON**（HttpApi.respond 对 4xx/5xx 一样写 body）。
+                # 不读出来就只剩一句 "HTTP 403"，真正的原因
+                # （如 "diag requires an admin token"）会被吞掉。
+                raw, payload = None, None
+                try:
+                    raw = e.read().decode("utf-8", "replace")
+                    payload = json.loads(raw)
+                except Exception:
+                    pass
                 last = e
-                if 400 <= e.code < 500:
-                    raise ArenaError(e.code, f"HTTP {e.code}")
+                # 429 限流与 5xx 是暂时的，值得退避重试；
+                # 其余 4xx 是调用方自己写错了，重试没有意义。
+                if e.code != 429 and e.code < 500:
+                    err = self._error(payload, e.code, f"HTTP {e.code}")
+                    err.status, err.body = e.code, raw
+                    raise err
             except Exception as e:                      # 传输层
                 last = e
             if attempt < self.max_retries - 1:
