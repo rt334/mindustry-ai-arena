@@ -471,7 +471,67 @@ for(Player p : Groups.player){
 `viewTeamFor` 走 `NetServer.viewTeamProvider` 这个回调。**它是一个可选注入点，
 不注册就返回 null** —— 于是任何「观战者绑定到某个真实队伍」的用法都会
 静默掉进 `continue`，收不到任何快照。
-## 十六、三条工程纪律（本项目反复踩到）
+## 十六、每队只有一个建造单位 —— 下单是有吞吐上限的
+
+**这是本项目最实用的发现，也是最容易忽略的。**
+
+`GET /queue` 返回：
+
+```json
+{"builders":[{"unit":223,"type":"gamma","plans":42}]}
+```
+
+**整队只有一名建造工人（`gamma`），`plans` 是它背上的待建清单长度。**
+所有 `/place` 下过的单都排在这一个人身上，它必须**逐格走到工地**才能施工。
+
+### 症状与误判
+
+队列一长，会出现一堆看起来像「功能故障」的现象：
+
+| 现象 | 直觉误判 | 真相 |
+|---|---|---|
+| 刚下的单读回来是 `build1`、半天不变 | 方块类型不对 / 订单丢了 | 排在队列里没轮到 |
+| 43 格的干道只建成了 13 格 | 铺错了 / 被挡住了 | 工人在半路上 |
+| 远处的矿机迟迟不出现 | 材料不够 / tier 不对 | 同上 |
+
+**实测**：连续几轮批量下单后积压到 `plans=42`。此时「不产出」的真正原因是
+**建造吞吐**，与产线设计无关。
+
+### 判定方法
+
+**动手修任何东西之前，先读 `/queue`。**
+
+- `plans` 是个位数 → 队列健康，问题在别处
+- `plans` 几十上百 → **先停下，不要再下单**
+
+这时新下的单不会更快建成，只会让每一件都更晚。
+
+### 策略含义
+
+**「一次铺满」是错误的做法。** 在只有一个工人的前提下，批量下单等于把所有活推后。
+正确做法是**少而准**：
+
+1. 只下一小批（几个到十几个）
+2. 轮询队列消化到个位数（不是 sleep）
+3. 再下下一批
+
+### 想加快建造？
+
+`/spawn` 被禁用：
+
+```
+direct unit spawning is disabled: units must be produced by a factory.
+Build one (air-factory / ground-factory / naval-factory), give it power,
+select a plan with /config?x=<tileX>&y=<tileY>&value=<unitName>, then let it produce.
+Server-side override: -Darena.allowspawn=true
+```
+
+**⇒ 想并行建造，必须先建一个工厂并让它产单位。**
+这是一条独立的前置链，不是 `/place` 能绕过的。
+
+---
+
+## 十七、三条工程纪律（本项目反复踩到）
 
 **一、改语义宽泛的判定函数前，先列出所有调用点。**
 `isLocal()` / `isRemote()` / `isVisible()` 这类函数在不同位置可能承载**相反**的语义。
@@ -491,7 +551,7 @@ for(Player p : Groups.player){
 
 ---
 
-## 十七、网络
+## 十八、网络
 
 - 客户端 JVM **必须**带 `-Djava.net.preferIPv4Stack=true`。
   不带的话 UDP 可能绑到 IPv6，服务端按 IPv4 发的快照永远收不到。
