@@ -3899,6 +3899,17 @@ public final class HttpApi {
         return sb.append(']').toString();
     }
 
+    /** Point2.pack 的数组 → `[[x,y],...]`。 */
+    static String points(int[] packed) {
+        StringBuilder s = new StringBuilder("[");
+        for (int i = 0; i < packed.length; i++) {
+            if (i > 0) s.append(',');
+            arc.math.geom.Point2 pt = arc.math.geom.Point2.unpack(packed[i]);
+            s.append('[').append(pt.x).append(',').append(pt.y).append(']');
+        }
+        return s.append(']').toString();
+    }
+
     static String visibleBuildings(Snapshot.State s, int myTeam, boolean admin) {
         Team team = Team.get(myTeam);
         StringBuilder sb = new StringBuilder("[");
@@ -3965,6 +3976,12 @@ public final class HttpApi {
 
             if (b.config != null) o.put("config", b.config);
             if (b.constructing) o.put("constructing", true).put("buildProgress", b.buildProgress);
+
+            // 物流接口：这一格能从哪收货、把货推到哪。
+            // 只暴露**规则**，不暴露结论 —— 说清楚接口在哪，不替 AI 判断这条链会不会堵。
+            if (b.acceptsFrom != null) o.putRaw("acceptsFrom", points(b.acceptsFrom));
+            if (b.sendsTo != null) o.putRaw("sendsTo", points(b.sendsTo));
+
             sb.append(o.toString());
         }
         return sb.append(']').toString();
@@ -4010,12 +4027,13 @@ public final class HttpApi {
      */
     private static int statusFor(String json) {
         return switch (codeOf(json)) {
-            case 1001, 1003 -> 400;
+            case 1001, 1003, 1009 -> 400;
             case 1002 -> 404;
             case 1004 -> 429;
             case 1005, 1403 -> 403;     // forbidden：admin-only 端点、token 与队伍不符
             case 1006 -> 410;
             case 1007 -> 504;
+            case 1008 -> 409;           // conflict：footprint 被别的建筑或固体地形占住
             default -> 400;
         };
     }

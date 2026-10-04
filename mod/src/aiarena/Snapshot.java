@@ -189,12 +189,39 @@ public final class Snapshot {
          */
         public final int[] powerLinks;
 
+        /**
+         * 能推货进来的邻格（Point2.pack），null 表示该方块没有「接货口」概念。
+         *
+         * 传送带专用，按 `Conveyor.acceptItem` 的方位规则算（Conveyor.java:352-358）：
+         *
+         *     direction = |relativeTo(源格) - rotation|
+         *     direction == 0   背面，minitem >= 0.4   收
+         *     direction 1 / 3  两侧，minitem >  0.7   收  ← 拐弯容易堵的真因
+         *     direction == 2   正面（下游）           拒收
+         *
+         * 只列**该方位上真有建筑**的格 —— 空地不列，免得读的人以为那里有东西。
+         *
+         * 这是**规则**不是**结论**：告诉 AI 这格能从哪边收料，不替它判断
+         * 「这条链会不会堵」。
+         */
+        public final int[] acceptsFrom;
+
+        /**
+         * 把货推出去的格（Point2.pack）。
+         *
+         * 传送带 = 正面那一格（不管那里有没有东西，那是它的朝向）。
+         * 钻机 = **所有能接收的邻格** —— 钻机输出不受 rotation 控制，
+         * 所以这里给的是实测结果而不是推导，探针用它脚下占多数的那个矿。
+         */
+        public final int[] sendsTo;
+
         BuildInfo(int x, int y, int team, String block,
                   float health, float maxHealth, boolean enabled, float efficiency,
                   String[] items, int[] itemAmounts,
                   String[] liquids, float[] liquidAmounts,
                   String config, boolean constructing, float buildProgress,
-                  int rotation, float powerStatus, int[] powerLinks) {
+                  int rotation, float powerStatus, int[] powerLinks,
+                  int[] acceptsFrom, int[] sendsTo) {
             this.x = x; this.y = y; this.team = team; this.block = block;
             this.health = health; this.maxHealth = maxHealth;
             this.enabled = enabled; this.efficiency = efficiency;
@@ -205,6 +232,8 @@ public final class Snapshot {
             this.rotation = rotation;
             this.powerStatus = powerStatus;
             this.powerLinks = powerLinks;
+            this.acceptsFrom = acceptsFrom;
+            this.sendsTo = sendsTo;
         }
     }
 
@@ -406,14 +435,97 @@ public final class Snapshot {
                     }
                 }
 
+                // 物流接口：这一格能从哪收、往哪推。单独 try —— 判定失败
+                // 不该让整张快照挂掉。
+                int[] acceptsFrom = null, sendsTo = null;
+                try {
+                    acceptsFrom = conveyorInputs(b);
+                    sendsTo = conveyorOutput(b);
+                    if (sendsTo == null) sendsTo = drillOutputs(b);
+                } catch (Throwable ignored) { }
+
                 list.add(new BuildInfo(
                     b.tileX(), b.tileY(), b.team.id, b.block.name,
                     b.health, b.maxHealth, b.enabled, b.efficiency,
                     iNames, iAmts, lNames, lVals, cfg, constructing, progress,
-                    b.rotation, pstat, plinks));
+                    b.rotation, pstat, plinks, acceptsFrom, sendsTo));
             }
         }
         return list.toArray(BuildInfo.class);
+    }
+
+    // ---------------------------------------------------------------- 物流接口
+
+    /**
+     * relativeTo 编码 → 格偏移（Tile.java:95-101）。
+     *
+     *     0 = 西 (x-1)   1 = 北 (y-1)   2 = 东 (x+1)   3 = 南 (y+1)
+     *
+     * 别按屏幕直觉读：y 向下增长，编码 3 是屏幕**下方**。
+     * rotation 用同一套编码，于是 rot 0 = 面朝东、1 = 面朝南、2 = 面朝西、3 = 面朝北。
+     * （引擎自己在 Conveyor.java:166 的注释里把 1 写成「北」，那是照抄 Rotation.top
+     *   这个枚举名 —— 枚举的 top 指向屏幕下方，别信它。）
+     */
+    private static final int[] REL_DX = {-1, 0, 1, 0};
+    private static final int[] REL_DY = {0, -1, 0, 1};
+
+    /** 传送带的接货口：背面 + 两侧，只保留该方位上真有建筑的格。正面拒收，不列。 */
+    private static int[] conveyorInputs(mindustry.gen.Building b) {
+        if (!(b instanceof mindustry.world.blocks.distribution.Conveyor.ConveyorBuild)) return null;
+        arc.struct.IntSeq seq = new arc.struct.IntSeq();
+        int x = b.tileX(), y = b.tileY(), r = b.rotation;
+        for (int rel = 0; rel < 4; rel++) {
+            if (Math.abs(rel - r) == 2) continue;               // 正面：拒收
+            int nx = x + REL_DX[rel], ny = y + REL_DY[rel];
+            if (Vars.world.build(nx, ny) == null) continue;     // 那格是空地
+            seq.add(arc.math.geom.Point2.pack(nx, ny));
+        }
+        return seq.size == 0 ? null : seq.toArray();
+    }
+
+    /** 传送带的正面格。即使空着也返回 —— 那是它的朝向。 */
+    private static int[] conveyorOutput(mindustry.gen.Building b) {
+        if (!(b instanceof mindustry.world.blocks.distribution.Conveyor.ConveyorBuild)) return null;
+        int rel = (b.rotation + 2) % 4;
+        return new int[]{ arc.math.geom.Point2.pack(b.tileX() + REL_DX[rel],
+                                                    b.tileY() + REL_DY[rel]) };
+    }
+
+    /**
+     * 钻机实际能推货出去的邻格。
+     *
+     * 钻机输出不受 rotation 控制（Drill.java:289 的 dump 向所有相邻接收方推），
+     * 所以这不是推导而是实测：拿它脚下占多数的那个矿当探针，逐个邻格调 acceptItem。
+     * footprint 退化成一份「谁在接货」的真实清单。
+     */
+    private static int[] drillOutputs(mindustry.gen.Building b) {
+        if (!(b instanceof mindustry.world.blocks.production.Drill.DrillBuild db)) return null;
+
+        arc.struct.IntSeq seq = new arc.struct.IntSeq();
+        int x = db.tileX(), y = db.tileY(), s = db.block.size;
+        for (int i = 0; i < s; i++) {
+            addNeighbour(seq, x + i, y - 1);                    // 上
+            addNeighbour(seq, x + i, y + s);                    // 下
+            addNeighbour(seq, x - 1, y + i);                    // 左
+            addNeighbour(seq, x + s, y + i);                    // 右
+        }
+        return seq.size == 0 ? null : seq.toArray();
+    }
+
+    /**
+     * 只列**有建筑**的方位，不判「此刻能不能收」。
+     *
+     * 原先这里调的是 `acceptItem`，读数会来回抖：传送带入口被自己身上的货占住时
+     * `minitem <= 0.7`（Conveyor.java:358 的侧面条件），判定立刻变 false，
+     * sendsTo 就空了 —— 而钻机其实一直在往那条带子上推货。实测撞到过：
+     * 带子上明明堆着 2 个铜，sendsTo 却是 null。
+     *
+     * 「这台钻机挨着哪几个邻居」是**结构事实**，稳定、可缓存、能拿来布线；
+     * 「此刻这一格收不收」是瞬时状态，要判也该由读的人结合 items 自己判。
+     */
+    private static void addNeighbour(arc.struct.IntSeq seq, int x, int y) {
+        if (Vars.world.build(x, y) == null) return;
+        seq.add(arc.math.geom.Point2.pack(x, y));
     }
 
     // ---------------------------------------------------------------- diff

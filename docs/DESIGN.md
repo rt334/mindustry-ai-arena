@@ -803,8 +803,11 @@ public static Team get(int id){ return all[((byte)id) & 0xff]; }
 ```
 1001 bad_request      1002 not_found         1003 out_of_bounds
 1004 queue_full       1005 read_only         1006 cursor_expired
-1007 op_expired       1401 unauthorized      1403 forbidden
-1500 internal_error
+1007 op_expired       1008 place_blocked     1009 place_invalid
+1401 unauthorized     1403 forbidden         1500 internal_error
+
+1008 -> HTTP 409（footprint 被占，挪一格即可）
+1009 -> HTTP 400（引擎拒绝，重试无意义）
 ```
 
 **分页（实现与早期设计不同）** —— 早期建议「按 1 MiB 阈值切 + `cursor_next`」，

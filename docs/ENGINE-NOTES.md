@@ -986,3 +986,39 @@ POST /control?op=order&unit=<id>&x=<格>&y=<格>
   其他断开都只弹对话框，需要自己实现退避重连。
 - 数据目录由引擎决定，是 OS 的 app-data 目录（`%APPDATA%\Mindustry`），
   **与 `-WorkingDirectory` 无关**。引擎没有 `-Dmindustry.data.dir` 这个属性。
+
+---
+
+## 二十七、`acceptItem` 是**瞬时判定**，不能当结构事实用
+
+`Building.acceptItem(source, item)`（`Building.java:577`，传送带覆写在
+`Conveyor.java:352-358`）问的是「**此刻**这一格收不收下这个货」，判据是当前库存
+与入口间距：
+
+```java
+// Conveyor.java:354, 358
+if(len >= capacity) return false;                       // 自己身上满了
+return (direction == 0    && minitem >= itemSpace)      // 背面：宽松
+    || (direction % 2 == 1 && minitem >  0.7f);         // 两侧：严格
+```
+
+**踩到的坑**：给 `/buildings` 加「这台钻机往哪推货」时，我拿 `acceptItem` 逐个
+邻格判定，结果读数来回抖：
+
+```
+钻机 (275,88) 旁边的带子 (275,90) 上堆着 2 个铜（货明明在流）
+/buildings 却报钻机 sendsTo = null
+```
+
+那一刻带子入口被自己身上的货占住，`minitem <= 0.7`，侧面判定返回 false；
+下一帧可能又变 true。**同一个事实，两次查询给出不同答案。**
+
+**规矩**：
+
+- 要「挨着谁」这类**结构事实**，直接看 `Vars.world.build(x, y) != null`；
+- `acceptItem` 只适合回答「**现在**能不能塞进去」，而且答案会抖；
+- 任何依赖 `len` / `minitem` / `items` / `efficiency` 的判定都不要放进快照字段 ——
+  快照是给 AI 读的结构信息，抖动会让它据此做出错误决策。
+
+**这是接口设计问题，不是引擎缺陷** —— `acceptItem` 本来就是为「这一刻要不要
+把货递过去」设计的，用错了地方而已。

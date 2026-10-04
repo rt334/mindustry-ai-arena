@@ -86,7 +86,52 @@ public final class Actor {
                               + (unitId > 0 ? " (requested id=" + unitId + ")" : ""), e);
         }
 
-        // ---- 约束 3：入队，交给引擎 ----
+        // ---- 约束 3：预检。不给原因的话 AI 只能盲重试 ----
+        //
+        // 三种失败必须分开报，否则「place 成功但方块不出现」无法归因：
+        //   1004 队列满      —— 等一等就行
+        //   1008 footprint 被占 —— 挪一格或先拆
+        //   1009 位置不合法   —— 换地方，重试没有意义
+        if (builder.plans != null && builder.plans.size >= Operations.MAX_PLANS_PER_UNIT) {
+            Json.Obj e = new Json.Obj();
+            if (mat != null) e.putRaw("materials", mat.toString());
+            e.put("pendingPlans", builder.plans.size)
+             .put("maxPlans", Operations.MAX_PLANS_PER_UNIT)
+             .put("suggestion", "wait for the builder to drain its queue, or POST /queue?clear=true");
+            return Result.err(1004, "builder " + builder.id + " queue is full: "
+                              + builder.plans.size + " plans (max "
+                              + Operations.MAX_PLANS_PER_UNIT + ")", e);
+        }
+
+        // 用引擎自己的判定，不复刻它的规则（含地形、权限、coreZone 等全部条件）。
+        // checkVisible 传 false —— 可见性上面已经单独查过了。
+        if (!mindustry.world.Build.validPlace(block, team, x, y, rotation, false)) {
+            int size = block.size;
+            int hx = -1, hy = -1;
+            for (int dx = 0; dx < size && hx < 0; dx++) {
+                for (int dy = 0; dy < size; dy++) {
+                    Tile t = Vars.world.tile(x + dx, y + dy);
+                    if (t == null) continue;
+                    if (t.build != null || t.solid()) { hx = x + dx; hy = y + dy; break; }
+                }
+            }
+            Json.Obj e = new Json.Obj();
+            if (mat != null) e.putRaw("materials", mat.toString());
+            e.put("block", block.name).put("size", size)
+             .put("anchor", "[" + x + "," + y + "]");
+            if (hx >= 0) {
+                e.putRaw("conflictAt", "[" + hx + "," + hy + "]")
+                 .put("suggestion", "footprint is occupied; shift the anchor or /break that tile");
+                return Result.err(1008, "footprint of " + block.name + " (" + size + "x" + size
+                                  + ") at (" + x + "," + y + ") is blocked by the tile at ("
+                                  + hx + "," + hy + ")", e);
+            }
+            e.put("suggestion", "engine rejected this placement (terrain, rules or team permission)");
+            return Result.err(1009, "placement invalid at (" + x + "," + y + ") for "
+                              + block.name, e);
+        }
+
+        // ---- 约束 4：入队，交给引擎 ----
         BuildPlan plan = (config == null)
             ? new BuildPlan(x, y, rotation, block)
             : new BuildPlan(x, y, rotation, block, config);

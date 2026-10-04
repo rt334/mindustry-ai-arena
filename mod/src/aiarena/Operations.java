@@ -289,7 +289,14 @@ public final class Operations {
 
     // ---------------------------------------------------------------- build queue
 
-    /** 查看队伍所有建造单位的待办计划数。 */
+    /**
+     * 查看队伍所有建造单位的待办计划。
+     *
+     * 早先只给一个 plans 计数，AI 拿不到坐标 —— 想加速建造就得自己维护一份
+     * pending 清单，而丢单会让清单和服务端实际状态对不上。现在把每个计划摊开：
+     * 坐标、目标方块、是不是拆除，以及**该格已经在施工时的进度** ——
+     * 有 progress 才能定位「卡住不动的那一个」。
+     */
     public static String queueReport(Team team) {
         StringBuilder sb = new StringBuilder("[");
         boolean first = true;
@@ -297,8 +304,34 @@ public final class Operations {
             if (u == null || u.team != team || !u.canBuild()) continue;
             if (!first) sb.append(',');
             first = false;
-            int n = u.plans == null ? 0 : u.plans.size;
-            sb.append(new Json.Obj().put("unit", u.id).put("type", u.type.name).put("plans", n).toString());
+
+            StringBuilder plans = new StringBuilder("[");
+            boolean pf = true;
+            int n = 0;
+            if (u.plans != null) {
+                n = u.plans.size;
+                for (mindustry.entities.units.BuildPlan plan : u.plans) {
+                    if (plan == null) continue;
+                    if (!pf) plans.append(',');
+                    pf = false;
+                    Json.Obj po = new Json.Obj()
+                        .put("x", plan.x).put("y", plan.y)
+                        .put("breaking", plan.breaking);
+                    if (plan.block != null) po.put("block", plan.block.name);
+                    // 只有已在施工的格子才有进度：0 且长时间不涨 = 卡住
+                    mindustry.gen.Building tb = Vars.world.build(plan.x, plan.y);
+                    if (tb instanceof mindustry.world.blocks.ConstructBlock.ConstructBuild cb) {
+                        po.put("constructing", true).put("progress", cb.progress);
+                    }
+                    plans.append(po.toString());
+                }
+            }
+            plans.append(']');
+
+            sb.append(new Json.Obj()
+                .put("unit", u.id).put("type", u.type.name).put("plans", n)
+                .putRaw("planList", plans.toString())
+                .toString());
         }
         return sb.append(']').toString();
     }
