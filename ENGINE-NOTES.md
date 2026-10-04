@@ -172,7 +172,64 @@ u -> u.team.isAI() ? new BuilderAI(true, 400f) : new CommandAI()
 
 ---
 
-## 七、观战视角的快照路由
+## 七、电力
+
+**判据是 `powerStatus`，不是 `powerLinks`。**
+
+- `powerStatus > 0` = 这个建筑在电网里拿到了电。
+- `powerLinks` 只统计**显式连线**，多数情况下为 0，**不能用来判断有没有电**。
+  实测一个正在满效率运行的 `silicon-smelter`，`powerLinks=0` 而 `powerStatus=1.0`。
+
+**电网靠相邻合并，但「贴着什么」很关键。**
+
+实测：把 `combustion-generator` 贴在**核心**旁边，`silicon-smelter` 一点电都拿不到；
+换成一串 `power-node` 从发电机搭到冶炼厂，`powerStatus` 立刻变 1.0。
+
+⇒ **不要指望「发电机贴着核心、冶炼厂贴着核心」就能自动并网。** 用 `power-node` 显式搭桥。
+
+---
+
+## 八、`sorter` 的接收规则与一个副产品用法
+
+```java
+// Sorter.SorterBuild
+public boolean acceptItem(Building source, Item item){
+    return items.total() == 0 && (sortItem == null || sortItem == item);
+}
+```
+
+**`sorter` 只接收与 `config` 相同的物品，其他一律拒绝**（不是「送到侧面」）。
+所以：
+
+- 想让 **A 通过、B 被挡**：把 `sorter` 的 `config` 设成 A。B 会被拒收、退回上游。
+- `sorter` 的 `rotation` **不随 `/place?rot=` 生效**（实测传 `rot=3`，建成后是 `r0`）。
+  依赖方向的分流不可靠，别用。
+
+**副产品用法（很有用）**：把**消耗型建筑直接放在混料传送带的正下方**。
+
+实测：一条煤带从远处捎带进了沙，末端一格 `(x,y)` 被沙塞死。
+把那一格换成 `combustion-generator` 后 —— 发电机**只收煤**，沙被拒收退回上游的矿机
+（矿机另有别的出口，不会因此堵死），而煤直接进发电机点火。
+
+一处改动同时解决了「混料堵塞」和「发电机燃料」两个问题，比 `sorter` 可靠。
+
+同理适用于任何 `consumeItem` 的建筑：**它天然的物品过滤本身就是一层分离器。**
+
+---
+
+## 九、三条工程纪律（本项目反复踩到）
+
+**一、改语义宽泛的判定函数前，先列出所有调用点。**
+`isLocal()` / `isRemote()` / `isVisible()` 这类函数在不同位置可能承载**相反**的语义。
+本项目在 `isLocal()` 上踩过：为修一个「单位不移动」而改成全局 true，
+结果打断 `NetServer.sync()` 的玩家过滤，服务端一个快照都不发（见 6.1）。
+
+**二、先证明上限，再下结论。**
+用受限视野扫出来的数字会安静地偏低，看起来完全合理。评估容量前先确认覆盖比例。
+
+**三、一次只改一个变量。**
+铺一片再测，出问题无法归因；测出的差异也不知道是哪一处造成的。
+
 
 `NetServer.sync()` 在 `rules.fog` 下的路由逻辑：
 
@@ -195,7 +252,7 @@ for(Player p : Groups.player){
 
 ---
 
-## 八、网络
+## 十、网络
 
 - 客户端 JVM **必须**带 `-Djava.net.preferIPv4Stack=true`。
   不带的话 UDP 可能绑到 IPv6，服务端按 IPv4 发的快照永远收不到。

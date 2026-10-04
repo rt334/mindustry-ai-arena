@@ -1,0 +1,340 @@
+== ITEMS ==
+{"name": "copper", "color": "d99d73ff", "hardness": 1, "flammability": 0.0}
+{"name": "lead", "color": "8c7fa9ff", "hardness": 1, "flammability": 0.0}
+{"name": "metaglass", "color": "ebeef5ff", "hardness": 0, "flammability": 0.0}
+{"name": "graphite", "color": "b2c6d2ff", "hardness": 0, "flammability": 0.0}
+{"name": "sand", "color": "f7cba4ff", "hardness": 0, "flammability": 0.0}
+{"name": "coal", "color": "272727ff", "hardness": 2, "flammability": 1.0}
+{"name": "titanium", "color": "8da1e3ff", "hardness": 3, "flammability": 0.0}
+{"name": "thorium", "color": "f9a3c7ff", "hardness": 4, "flammability": 0.0}
+{"name": "scrap", "color": "777777ff", "hardness": 0, "flammability": 0.0}
+{"name": "silicon", "color": "53565cff", "hardness": 0, "flammability": 0.0}
+{"name": "plastanium", "color": "cbd97fff", "hardness": 0, "flammability": 0.1}
+{"name": "phase-fabric", "color": "f4ba6eff", "hardness": 0, "flammability": 0.0}
+{"name": "surge-alloy", "color": "f3e979ff", "hardness": 0, "flammability": 0.0}
+{"name": "spore-pod", "color": "7457ceff", "hardness": 0, "flammability": 1.15}
+{"name": "blast-compound", "color": "ff795eff", "hardness": 0, "flammability": 0.4}
+{"name": "pyratite", "color": "ffaa5fff", "hardness": 0, "flammability": 1.4}
+{"name": "beryllium", "color": "3a8f64ff", "hardness": 3, "flammability": 0.0}
+{"name": "tungsten", "color": "768a9aff", "hardness": 5, "flammability": 0.0}
+{"name": "oxide", "color": "e4ffd6ff", "hardness": 0, "flammability": 0.0}
+{"name": "carbide", "color": "89769aff", "hardness": 0, "flammability": 0.0}
+
+== LIQUIDS ==
+{"name": "water", "color": "596ab8ff", "flammability": 0.0, "temperature": 0.5}
+{"name": "slag", "color": "ffa166ff", "flammability": 0.0, "temperature": 1.0}
+{"name": "oil", "color": "313131ff", "flammability": 1.2, "temperature": 0.5}
+{"name": "cryofluid", "color": "6ecdecff", "flammability": 0.0, "temperature": 0.25}
+{"name": "neoplasm", "color": "c33e2bff", "flammability": 0.0, "temperature": 0.54}
+{"name": "arkycite", "color": "84a94bff", "flammability": 0.4, "temperature": 0.5}
+{"name": "ozone", "color": "fc81dd99", "flammability": 1.0, "temperature": 0.5}
+{"name": "hydrogen", "color": "9eabf799", "flammability": 1.0, "temperature": 0.5}
+{"name": "nitrogen", "color": "efe3ff99", "flammability": 0.0, "temperature": 0.5}
+{"name": "cyanogen", "color": "89e8b699", "flammability": 2.0, "temperature": 0.5}
+
+== BLOCKS by category ==
+--- crafting (33) ---
+   atmospheric-concentrator size=3 hp=755 power=True cost={'silicon': 150, 'beryllium': 180, 'oxide': 60}
+   blast-mixer              size=2 hp=160 power=True cost={'lead': 30, 'titanium': 20}
+   carbide-crucible         size=3 hp=900 power=True cost={'thorium': 150, 'tungsten': 110, 'oxide': 60}
+   coal-centrifuge          size=2 hp=160 power=True cost={'lead': 30, 'graphite': 40, 'titanium': 20}
+   cryofluid-mixer          size=2 hp=160 power=True cost={'lead': 65, 'titanium': 60, 'silicon': 40}
+   cyanogen-synthesizer     size=3 hp=1150 power=True cost={'silicon': 120, 'beryllium': 140, 'oxide': 40, 'carbide': 80}
+   disassembler             size=3 hp=465 power=True cost={'titanium': 100, 'thorium': 80, 'silicon': 150, 'plastanium': 40}
+   electric-heater          size=2 hp=460 power=True cost={'beryllium': 30, 'tungsten': 30, 'oxide': 30}
+   electrolyzer             size=3 hp=860 power=True cost={'graphite': 40, 'silicon': 50, 'beryllium': 130, 'tungsten': 80}
+   graphite-press           size=2 hp=160 power=False cost={'copper': 75, 'lead': 30}
+   heat-redirector          size=3 hp=645 power=False cost={'graphite': 10, 'tungsten': 10}
+   heat-router              size=3 hp=645 power=False cost={'graphite': 10, 'tungsten': 15}
+   incinerator              size=1 hp=90 power=True cost={'lead': 15, 'graphite': 5}
+   kiln                     size=2 hp=160 power=True cost={'copper': 60, 'lead': 30, 'graphite': 30}
+   melter                   size=1 hp=200 power=True cost={'copper': 30, 'lead': 35, 'graphite': 45}
+   multi-press              size=3 hp=360 power=True cost={'lead': 100, 'graphite': 50, 'titanium': 100, 'silicon': 25}
+   oxidation-chamber        size=3 hp=860 power=True cost={'graphite': 80, 'silicon': 100, 'beryllium': 120, 'tungsten': 120}
+   phase-heater             size=2 hp=510 power=False cost={'beryllium': 30, 'oxide': 30, 'carbide': 30}
+   phase-synthesizer        size=3 hp=1115 power=True cost={'thorium': 100, 'silicon': 100, 'tungsten': 200, 'carbide': 90}
+   phase-weaver             size=2 hp=190 power=True cost={'lead': 120, 'thorium': 75, 'silicon': 130}
+   plastanium-compressor    size=2 hp=320 power=True cost={'lead': 115, 'graphite': 60, 'titanium': 80, 'silicon': 80}
+   pulverizer               size=1 hp=40 power=True cost={'copper': 30, 'lead': 25}
+   pyratite-mixer           size=2 hp=160 power=True cost={'copper': 50, 'lead': 25}
+   separator                size=2 hp=160 power=True cost={'copper': 30, 'titanium': 25}
+   silicon-arc-furnace      size=3 hp=575 power=True cost={'graphite': 80, 'beryllium': 70}
+   silicon-crucible         size=3 hp=395 power=True cost={'metaglass': 80, 'titanium': 120, 'silicon': 60, 'plastanium': 35}
+   silicon-smelter          size=2 hp=160 power=True cost={'copper': 30, 'lead': 25}
+   slag-heater              size=3 hp=1040 power=False cost={'beryllium': 20, 'tungsten': 50, 'oxide': 20}
+   slag-incinerator         size=1 hp=70 power=False cost={'tungsten': 15}
+   small-heat-redirector    size=2 hp=200 power=False cost={'graphite': 8, 'surge-alloy': 3}
+   spore-press              size=2 hp=320 power=True cost={'lead': 35, 'silicon': 30}
+   surge-crucible           size=3 hp=825 power=True cost={'graphite': 80, 'silicon': 100, 'tungsten': 80, 'oxide': 80}
+   surge-smelter            size=3 hp=430 power=True cost={'lead': 80, 'thorium': 70, 'silicon': 80}
+--- defense (28) ---
+   beryllium-wall           size=1 hp=520 power=False cost={'beryllium': 6}
+   beryllium-wall-large     size=2 hp=2080 power=False cost={'beryllium': 24}
+   blast-door               size=2 hp=2800 power=False cost={'silicon': 24, 'tungsten': 24}
+   carbide-wall             size=1 hp=1080 power=False cost={'thorium': 6, 'carbide': 6}
+   carbide-wall-large       size=2 hp=4320 power=False cost={'thorium': 24, 'carbide': 24}
+   copper-wall              size=1 hp=320 power=False cost={'copper': 6}
+   copper-wall-large        size=2 hp=1280 power=False cost={'copper': 24}
+   door                     size=1 hp=400 power=False cost={'titanium': 6, 'silicon': 4}
+   door-large               size=2 hp=1600 power=False cost={'titanium': 24, 'silicon': 16}
+   phase-wall               size=1 hp=600 power=False cost={'phase-fabric': 6}
+   phase-wall-large         size=2 hp=2400 power=False cost={'phase-fabric': 24}
+   plastanium-wall          size=1 hp=500 power=False cost={'metaglass': 2, 'plastanium': 5}
+   plastanium-wall-large    size=2 hp=2000 power=False cost={'metaglass': 8, 'plastanium': 20}
+   reinforced-surge-wall    size=1 hp=1000 power=False cost={'surge-alloy': 6, 'tungsten': 2}
+   reinforced-surge-wall-large size=2 hp=4000 power=False cost={'surge-alloy': 24, 'tungsten': 8}
+   scrap-wall               size=1 hp=240 power=False cost={'scrap': 6}
+   scrap-wall-gigantic      size=4 hp=3840 power=False cost={'scrap': 96}
+   scrap-wall-huge          size=3 hp=2160 power=False cost={'scrap': 54}
+   scrap-wall-large         size=2 hp=960 power=False cost={'scrap': 24}
+   shielded-wall            size=2 hp=4160 power=True cost={'phase-fabric': 20, 'surge-alloy': 12, 'beryllium': 12}
+   surge-wall               size=1 hp=920 power=False cost={'surge-alloy': 6}
+   surge-wall-large         size=2 hp=3680 power=False cost={'surge-alloy': 24}
+   thorium-wall             size=1 hp=800 power=False cost={'thorium': 6}
+   thorium-wall-large       size=2 hp=3200 power=False cost={'thorium': 24}
+   titanium-wall            size=1 hp=440 power=False cost={'titanium': 6}
+   titanium-wall-large      size=2 hp=1760 power=False cost={'titanium': 24}
+   tungsten-wall            size=1 hp=720 power=False cost={'tungsten': 6}
+   tungsten-wall-large      size=2 hp=2880 power=False cost={'tungsten': 24}
+--- distribution (26) ---
+   armored-conveyor         size=1 hp=280 power=False cost={'metaglass': 1, 'thorium': 1, 'plastanium': 1}
+   armored-duct             size=1 hp=140 power=False cost={'beryllium': 2, 'tungsten': 1}
+   bridge-conveyor          size=1 hp=40 power=False cost={'copper': 6, 'lead': 6}
+   conveyor                 size=1 hp=45 power=False cost={'copper': 1}
+   distributor              size=2 hp=160 power=False cost={'copper': 4, 'lead': 4}
+   duct                     size=1 hp=90 power=False cost={'beryllium': 1}
+   duct-bridge              size=1 hp=90 power=False cost={'beryllium': 15}
+   duct-router              size=1 hp=90 power=False cost={'beryllium': 10}
+   duct-unloader            size=1 hp=120 power=False cost={'graphite': 20, 'silicon': 20, 'tungsten': 10}
+   inverted-sorter          size=1 hp=40 power=False cost={'copper': 2, 'lead': 2}
+   junction                 size=1 hp=30 power=False cost={'copper': 3}
+   mass-driver              size=3 hp=430 power=True cost={'lead': 125, 'titanium': 125, 'thorium': 50, 'silicon': 75}
+   overflow-duct            size=1 hp=90 power=False cost={'graphite': 8, 'beryllium': 8}
+   overflow-gate            size=1 hp=40 power=False cost={'copper': 4, 'lead': 2}
+   phase-conveyor           size=1 hp=50 power=True cost={'lead': 10, 'graphite': 10, 'silicon': 7, 'phase-fabric': 5}
+   plastanium-conveyor      size=1 hp=90 power=False cost={'graphite': 1, 'silicon': 1, 'plastanium': 1}
+   router                   size=1 hp=40 power=False cost={'copper': 3}
+   sorter                   size=1 hp=40 power=False cost={'copper': 2, 'lead': 2}
+   surge-conveyor           size=1 hp=130 power=True cost={'surge-alloy': 1, 'tungsten': 1}
+   surge-router             size=1 hp=130 power=True cost={'surge-alloy': 5, 'tungsten': 1}
+   titanium-conveyor        size=1 hp=65 power=False cost={'copper': 1, 'lead': 1, 'titanium': 1}
+   underflow-duct           size=1 hp=90 power=False cost={'graphite': 8, 'beryllium': 8}
+   underflow-gate           size=1 hp=40 power=False cost={'copper': 4, 'lead': 2}
+   unit-cargo-loader        size=3 hp=630 power=True cost={'silicon': 80, 'surge-alloy': 50, 'oxide': 20}
+   unit-cargo-unload-point  size=2 hp=285 power=False cost={'silicon': 60, 'tungsten': 60}
+   unloader                 size=1 hp=70 power=False cost={'titanium': 25, 'silicon': 30}
+--- effect (20) ---
+   build-tower              size=3 hp=610 power=True cost={'thorium': 60, 'silicon': 150, 'oxide': 40}
+   container                size=2 hp=220 power=False cost={'titanium': 100}
+   core-acropolis           size=6 hp=30000 power=False cost={'silicon': 5000, 'beryllium': 6000, 'tungsten': 5000, 'oxide': 3000, 'carbide': 3000}
+   core-bastion             size=4 hp=4500 power=False cost={'graphite': 1000, 'silicon': 1000, 'beryllium': 800}
+   core-citadel             size=5 hp=16000 power=False cost={'silicon': 4000, 'beryllium': 4000, 'tungsten': 3000, 'oxide': 1000}
+   core-foundation          size=4 hp=3500 power=False cost={'copper': 3000, 'lead': 3000, 'silicon': 2000}
+   core-nucleus             size=5 hp=6000 power=False cost={'copper': 8000, 'lead': 8000, 'thorium': 4000, 'silicon': 5000}
+   core-shard               size=3 hp=1100 power=False cost={'copper': 1000, 'lead': 800}
+   force-projector          size=3 hp=360 power=True cost={'lead': 100, 'titanium': 75, 'silicon': 125}
+   mend-projector           size=2 hp=320 power=True cost={'copper': 50, 'lead': 100, 'titanium': 25, 'silicon': 40}
+   mender                   size=1 hp=80 power=True cost={'copper': 25, 'lead': 30}
+   overdrive-dome           size=3 hp=485 power=True cost={'lead': 200, 'titanium': 130, 'silicon': 130, 'plastanium': 80, 'surge-alloy': 120}
+   overdrive-projector      size=2 hp=175 power=True cost={'lead': 100, 'titanium': 75, 'silicon': 75, 'plastanium': 30}
+   radar                    size=1 hp=60 power=True cost={'graphite': 50, 'silicon': 60, 'beryllium': 10}
+   regen-projector          size=3 hp=1040 power=True cost={'silicon': 80, 'beryllium': 80, 'tungsten': 60, 'oxide': 40}
+   reinforced-container     size=2 hp=480 power=False cost={'graphite': 40, 'tungsten': 30}
+   reinforced-vault         size=3 hp=1080 power=False cost={'thorium': 70, 'beryllium': 100, 'tungsten': 125}
+   shock-mine               size=1 hp=50 power=False cost={'lead': 25, 'silicon': 12}
+   shockwave-tower          size=3 hp=915 power=True cost={'silicon': 150, 'surge-alloy': 50, 'tungsten': 100, 'oxide': 30}
+   vault                    size=3 hp=495 power=False cost={'titanium': 250, 'thorium': 125}
+--- liquid (19) ---
+   bridge-conduit           size=1 hp=40 power=False cost={'metaglass': 8, 'graphite': 4}
+   conduit                  size=1 hp=45 power=False cost={'metaglass': 1}
+   impulse-pump             size=3 hp=430 power=True cost={'copper': 80, 'metaglass': 90, 'titanium': 40, 'thorium': 35, 'silicon': 30}
+   liquid-container         size=2 hp=160 power=False cost={'metaglass': 15, 'titanium': 10}
+   liquid-junction          size=1 hp=40 power=False cost={'metaglass': 8, 'graphite': 4}
+   liquid-router            size=1 hp=40 power=False cost={'metaglass': 2, 'graphite': 4}
+   liquid-tank              size=3 hp=500 power=False cost={'metaglass': 40, 'titanium': 30}
+   mechanical-pump          size=1 hp=40 power=False cost={'copper': 15, 'metaglass': 10}
+   phase-conduit            size=1 hp=50 power=True cost={'metaglass': 20, 'titanium': 10, 'silicon': 7, 'phase-fabric': 5}
+   plated-conduit           size=1 hp=220 power=False cost={'metaglass': 1, 'thorium': 2, 'plastanium': 1}
+   pulse-conduit            size=1 hp=90 power=False cost={'metaglass': 1, 'titanium': 2}
+   reinforced-bridge-conduit size=1 hp=250 power=False cost={'graphite': 8, 'beryllium': 20}
+   reinforced-conduit       size=1 hp=250 power=False cost={'beryllium': 2}
+   reinforced-liquid-container size=2 hp=400 power=False cost={'beryllium': 16, 'tungsten': 10}
+   reinforced-liquid-junction size=1 hp=250 power=False cost={'graphite': 4, 'beryllium': 8}
+   reinforced-liquid-router size=1 hp=250 power=False cost={'graphite': 8, 'beryllium': 4}
+   reinforced-liquid-tank   size=3 hp=900 power=False cost={'beryllium': 50, 'tungsten': 40}
+   reinforced-pump          size=2 hp=380 power=False cost={'silicon': 20, 'beryllium': 40, 'tungsten': 30}
+   rotary-pump              size=2 hp=160 power=True cost={'copper': 70, 'metaglass': 50, 'titanium': 35, 'silicon': 20}
+--- logic (13) ---
+   canvas                   size=2 hp=255 power=False cost={'silicon': 10, 'beryllium': 10}
+   hyper-processor          size=3 hp=520 power=False cost={'lead': 450, 'thorium': 75, 'silicon': 150, 'surge-alloy': 50}
+   large-canvas             size=3 hp=665 power=False cost={'silicon': 15, 'surge-alloy': 5, 'beryllium': 15}
+   large-logic-display      size=6 hp=1800 power=False cost={'lead': 200, 'metaglass': 100, 'silicon': 150, 'phase-fabric': 75}
+   logic-display            size=3 hp=360 power=False cost={'lead': 100, 'metaglass': 50, 'silicon': 50}
+   logic-processor          size=2 hp=190 power=False cost={'lead': 320, 'graphite': 60, 'thorium': 50, 'silicon': 80}
+   memory-bank              size=2 hp=200 power=False cost={'copper': 30, 'graphite': 80, 'silicon': 80, 'phase-fabric': 30}
+   memory-cell              size=1 hp=40 power=False cost={'copper': 30, 'graphite': 30, 'silicon': 30}
+   message                  size=1 hp=40 power=False cost={'copper': 5, 'graphite': 5}
+   micro-processor          size=1 hp=40 power=False cost={'copper': 90, 'lead': 50, 'silicon': 50}
+   reinforced-message       size=1 hp=100 power=False cost={'graphite': 10, 'beryllium': 5}
+   switch                   size=1 hp=40 power=False cost={'copper': 5, 'graphite': 5}
+   tile-logic-display       size=1 hp=50 power=False cost={'lead': 8, 'metaglass': 8, 'silicon': 8, 'phase-fabric': 3}
+--- power (23) ---
+   battery                  size=1 hp=40 power=True cost={'copper': 5, 'lead': 20}
+   battery-large            size=3 hp=360 power=True cost={'lead': 50, 'titanium': 20, 'silicon': 30}
+   beam-link                size=3 hp=1170 power=True cost={'silicon': 250, 'phase-fabric': 75, 'surge-alloy': 75, 'beryllium': 250, 'oxide': 150, 'carbide': 75}
+   beam-node                size=1 hp=90 power=True cost={'beryllium': 8}
+   beam-tower               size=3 hp=810 power=True cost={'silicon': 10, 'beryllium': 30, 'oxide': 10}
+   chemical-combustion-chamber size=3 hp=825 power=True cost={'graphite': 40, 'silicon': 30, 'tungsten': 20, 'oxide': 40}
+   combustion-generator     size=1 hp=40 power=True cost={'copper': 25, 'lead': 15}
+   differential-generator   size=3 hp=360 power=True cost={'copper': 70, 'lead': 100, 'metaglass': 50, 'titanium': 50, 'silicon': 65}
+   diode                    size=1 hp=40 power=False cost={'metaglass': 10, 'silicon': 10, 'plastanium': 5}
+   flux-reactor             size=5 hp=2850 power=True cost={'graphite': 240, 'silicon': 480, 'surge-alloy': 120, 'oxide': 80, 'carbide': 60}
+   impact-reactor           size=4 hp=900 power=True cost={'lead': 500, 'metaglass': 250, 'graphite': 400, 'thorium': 100, 'silicon': 300, 'surge-alloy': 250}
+   neoplasia-reactor        size=5 hp=3900 power=True cost={'silicon': 500, 'phase-fabric': 150, 'surge-alloy': 200, 'tungsten': 750, 'oxide': 150, 'carbide': 300}
+   power-node               size=1 hp=40 power=True cost={'copper': 2, 'lead': 6}
+   power-node-large         size=2 hp=160 power=True cost={'lead': 10, 'titanium': 5, 'silicon': 3}
+   pyrolysis-generator      size=3 hp=935 power=True cost={'graphite': 100, 'silicon': 100, 'oxide': 60, 'carbide': 60}
+   rtg-generator            size=2 hp=245 power=True cost={'lead': 100, 'thorium': 50, 'silicon': 75, 'plastanium': 75, 'phase-fabric': 25}
+   solar-panel              size=1 hp=40 power=True cost={'lead': 10, 'silicon': 8}
+   solar-panel-large        size=3 hp=450 power=True cost={'lead': 60, 'silicon': 70, 'phase-fabric': 15}
+   steam-generator          size=2 hp=160 power=True cost={'copper': 35, 'lead': 40, 'graphite': 25, 'silicon': 30}
+   surge-tower              size=2 hp=200 power=True cost={'lead': 10, 'titanium': 7, 'silicon': 15, 'surge-alloy': 15}
+   thermal-generator        size=2 hp=160 power=True cost={'copper': 40, 'lead': 50, 'metaglass': 40, 'graphite': 35, 'silicon': 35}
+   thorium-reactor          size=3 hp=1400 power=True cost={'lead': 300, 'metaglass': 50, 'graphite': 150, 'thorium': 150, 'silicon': 200}
+   turbine-condenser        size=3 hp=575 power=True cost={'beryllium': 60}
+--- production (14) ---
+   blast-drill              size=4 hp=765 power=True cost={'copper': 65, 'titanium': 50, 'thorium': 75, 'silicon': 60}
+   cliff-crusher            size=2 hp=255 power=True cost={'graphite': 25, 'beryllium': 20}
+   cultivator               size=2 hp=160 power=True cost={'copper': 25, 'lead': 25, 'silicon': 10}
+   eruption-drill           size=5 hp=2500 power=True cost={'thorium': 150, 'silicon': 300, 'tungsten': 250, 'oxide': 20}
+   impact-drill             size=4 hp=1020 power=True cost={'graphite': 60, 'silicon': 70, 'beryllium': 90}
+   large-cliff-crusher      size=3 hp=950 power=True cost={'silicon': 80, 'surge-alloy': 15, 'beryllium': 100, 'tungsten': 50}
+   large-plasma-bore        size=3 hp=1040 power=True cost={'silicon': 100, 'beryllium': 100, 'tungsten': 70, 'oxide': 25}
+   laser-drill              size=3 hp=360 power=True cost={'copper': 35, 'graphite': 30, 'titanium': 20, 'silicon': 30}
+   mechanical-drill         size=2 hp=160 power=False cost={'copper': 12}
+   oil-extractor            size=3 hp=430 power=True cost={'copper': 150, 'lead': 115, 'graphite': 175, 'thorium': 115, 'silicon': 75}
+   plasma-bore              size=2 hp=255 power=True cost={'beryllium': 40}
+   pneumatic-drill          size=2 hp=160 power=False cost={'copper': 18, 'graphite': 10}
+   vent-condenser           size=3 hp=575 power=True cost={'graphite': 20, 'beryllium': 60}
+   water-extractor          size=2 hp=160 power=True cost={'copper': 30, 'lead': 30, 'metaglass': 30, 'graphite': 30}
+--- turret (28) ---
+   afflict                  size=4 hp=3520 power=True cost={'graphite': 250, 'silicon': 200, 'surge-alloy': 100, 'oxide': 40}
+   arc                      size=1 hp=260 power=True cost={'copper': 50, 'lead': 50}
+   breach                   size=3 hp=1620 power=False cost={'graphite': 125, 'silicon': 150, 'beryllium': 150}
+   cyclone                  size=3 hp=1305 power=False cost={'copper': 200, 'titanium': 125, 'plastanium': 80}
+   diffuse                  size=3 hp=1890 power=False cost={'graphite': 200, 'silicon': 200, 'beryllium': 150, 'tungsten': 50}
+   disperse                 size=4 hp=4480 power=False cost={'thorium': 50, 'silicon': 200, 'beryllium': 350, 'oxide': 50}
+   duo                      size=1 hp=250 power=False cost={'copper': 35}
+   foreshadow               size=4 hp=2400 power=True cost={'copper': 1000, 'metaglass': 600, 'silicon': 600, 'plastanium': 200, 'surge-alloy': 300}
+   fuse                     size=3 hp=1980 power=False cost={'copper': 225, 'graphite': 225, 'thorium': 100}
+   hail                     size=1 hp=260 power=False cost={'copper': 40, 'graphite': 17}
+   lancer                   size=2 hp=1120 power=True cost={'copper': 60, 'lead': 70, 'titanium': 30, 'silicon': 60}
+   lustre                   size=4 hp=3360 power=True cost={'graphite': 200, 'silicon': 250, 'oxide': 50, 'carbide': 90}
+   malign                   size=5 hp=9250 power=True cost={'graphite': 500, 'silicon': 500, 'phase-fabric': 200, 'beryllium': 1000, 'carbide': 200}
+   meltdown                 size=4 hp=3200 power=True cost={'copper': 1200, 'lead': 350, 'graphite': 300, 'silicon': 325, 'surge-alloy': 325}
+   parallax                 size=2 hp=640 power=True cost={'graphite': 50, 'titanium': 110, 'silicon': 160}
+   ripple                   size=3 hp=1170 power=False cost={'copper': 150, 'graphite': 135, 'titanium': 60}
+   salvo                    size=2 hp=960 power=False cost={'copper': 100, 'graphite': 80, 'titanium': 50}
+   scathe                   size=4 hp=3520 power=False cost={'graphite': 400, 'silicon': 450, 'tungsten': 500, 'oxide': 100, 'carbide': 200}
+   scatter                  size=2 hp=800 power=False cost={'copper': 85, 'lead': 45}
+   scorch                   size=1 hp=400 power=False cost={'copper': 25, 'graphite': 22}
+   segment                  size=2 hp=1000 power=True cost={'titanium': 40, 'thorium': 80, 'silicon': 130, 'phase-fabric': 40}
+   smite                    size=5 hp=8750 power=False cost={'silicon': 800, 'phase-fabric': 300, 'surge-alloy': 400, 'oxide': 200, 'carbide': 500}
+   spectre                  size=4 hp=2560 power=False cost={'copper': 900, 'graphite': 300, 'thorium': 250, 'plastanium': 175, 'surge-alloy': 250}
+   sublimate                size=3 hp=1890 power=False cost={'silicon': 200, 'beryllium': 400, 'tungsten': 150, 'oxide': 40}
+   swarmer                  size=2 hp=1200 power=False cost={'graphite': 35, 'titanium': 35, 'silicon': 30, 'plastanium': 45}
+   titan                    size=4 hp=4000 power=False cost={'thorium': 400, 'silicon': 300, 'tungsten': 250}
+   tsunami                  size=3 hp=2250 power=False cost={'lead': 400, 'metaglass': 100, 'titanium': 250, 'thorium': 100}
+   wave                     size=2 hp=1000 power=False cost={'copper': 25, 'lead': 75, 'metaglass': 45}
+--- units (33) ---
+   additive-reconstructor   size=3 hp=360 power=True cost={'copper': 200, 'lead': 120, 'silicon': 90}
+   air-factory              size=3 hp=360 power=True cost={'copper': 60, 'lead': 70, 'silicon': 60}
+   basic-assembler-module   size=5 hp=3050 power=True cost={'thorium': 500, 'phase-fabric': 400, 'oxide': 250, 'carbide': 300}
+   constructor              size=3 hp=860 power=True cost={'silicon': 50, 'beryllium': 75, 'tungsten': 40}
+   deconstructor            size=5 hp=3195 power=True cost={'silicon': 250, 'beryllium': 250, 'oxide': 100, 'carbide': 50}
+   exponential-reconstructor size=7 hp=3035 power=True cost={'lead': 2000, 'titanium': 2000, 'thorium': 750, 'silicon': 1000, 'plastanium': 450, 'phase-fabric': 600}
+   ground-factory           size=3 hp=360 power=True cost={'copper': 50, 'lead': 120, 'silicon': 80}
+   large-constructor        size=5 hp=2500 power=True cost={'thorium': 80, 'silicon': 150, 'tungsten': 200, 'oxide': 100}
+   large-payload-mass-driver size=5 hp=2550 power=True cost={'graphite': 60, 'silicon': 150, 'phase-fabric': 10, 'tungsten': 120, 'oxide': 30}
+   mech-assembler           size=5 hp=3600 power=True cost={'thorium': 600, 'silicon': 1000, 'tungsten': 550, 'oxide': 200, 'carbide': 200}
+   mech-fabricator          size=3 hp=860 power=True cost={'silicon': 200, 'beryllium': 250, 'tungsten': 10}
+   mech-refabricator        size=3 hp=860 power=True cost={'silicon': 150, 'beryllium': 250, 'tungsten': 175}
+   multiplicative-reconstructor size=5 hp=1200 power=True cost={'lead': 650, 'titanium': 350, 'thorium': 650, 'silicon': 450}
+   naval-factory            size=3 hp=360 power=True cost={'copper': 150, 'lead': 130, 'metaglass': 120}
+   payload-conveyor         size=3 hp=360 power=False cost={'copper': 10, 'graphite': 10}
+   payload-loader           size=3 hp=645 power=True cost={'graphite': 80, 'silicon': 160, 'tungsten': 90}
+   payload-mass-driver      size=3 hp=645 power=True cost={'graphite': 20, 'silicon': 50, 'tungsten': 40}
+   payload-router           size=3 hp=360 power=False cost={'copper': 10, 'graphite': 15}
+   payload-unloader         size=3 hp=645 power=True cost={'graphite': 140, 'silicon': 220, 'tungsten': 180}
+   prime-refabricator       size=5 hp=2500 power=True cost={'thorium': 250, 'silicon': 400, 'tungsten': 200, 'oxide': 200}
+   reinforced-payload-conveyor size=3 hp=800 power=False cost={'tungsten': 10}
+   reinforced-payload-router size=3 hp=800 power=False cost={'tungsten': 15}
+   repair-point             size=1 hp=40 power=True cost={'copper': 30, 'lead': 30, 'silicon': 20}
+   repair-turret            size=2 hp=205 power=True cost={'thorium': 80, 'silicon': 90, 'plastanium': 60}
+   ship-assembler           size=5 hp=3600 power=True cost={'thorium': 400, 'silicon': 900, 'tungsten': 550, 'oxide': 200, 'carbide': 100}
+   ship-fabricator          size=3 hp=575 power=True cost={'silicon': 250, 'beryllium': 200}
+   ship-refabricator        size=3 hp=1040 power=True cost={'silicon': 150, 'beryllium': 250, 'tungsten': 120, 'oxide': 15}
+   small-deconstructor      size=3 hp=755 power=True cost={'graphite': 50, 'silicon': 70, 'beryllium': 70, 'oxide': 25}
+   tank-assembler           size=5 hp=2800 power=True cost={'thorium': 500, 'silicon': 650, 'oxide': 150, 'carbide': 80}
+   tank-fabricator          size=3 hp=575 power=True cost={'silicon': 200, 'beryllium': 150}
+   tank-refabricator        size=3 hp=860 power=True cost={'silicon': 100, 'beryllium': 200, 'tungsten': 80}
+   tetrative-reconstructor  size=9 hp=5830 power=True cost={'lead': 4000, 'thorium': 1000, 'silicon': 3000, 'plastanium': 600, 'phase-fabric': 600, 'surge-alloy': 800}
+   unit-repair-tower        size=2 hp=285 power=True cost={'graphite': 90, 'silicon': 90, 'tungsten': 80}
+
+== UNITS ==
+{"name": "dagger", "health": 150.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.5, "hitSize": 8.0, "itemCapacity": 30}
+{"name": "mace", "health": 550.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.5, "hitSize": 10.0, "itemCapacity": 40}
+{"name": "fortress", "health": 900.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.43, "hitSize": 13.0, "itemCapacity": 50}
+{"name": "scepter", "health": 9000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.36, "hitSize": 22.0, "itemCapacity": 80}
+{"name": "reign", "health": 24000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.4, "hitSize": 30.0, "itemCapacity": 120}
+{"name": "nova", "health": 200.0, "flying": false, "buildSpeed": 0.3, "fogRadius": 21.75, "speed": 0.55, "hitSize": 8.0, "itemCapacity": 30}
+{"name": "pulsar", "health": 320.0, "flying": false, "buildSpeed": 0.5, "fogRadius": 21.75, "speed": 0.7, "hitSize": 11.0, "itemCapacity": 40}
+{"name": "quasar", "health": 640.0, "flying": false, "buildSpeed": 1.1, "fogRadius": 21.75, "speed": 0.5, "hitSize": 13.0, "itemCapacity": 50}
+{"name": "vela", "health": 8200.0, "flying": false, "buildSpeed": 3.0, "fogRadius": 21.75, "speed": 0.44, "hitSize": 24.0, "itemCapacity": 90}
+{"name": "corvus", "health": 18000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.3, "hitSize": 29.0, "itemCapacity": 110}
+{"name": "crawler", "health": 150.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 1.0, "hitSize": 8.0, "itemCapacity": 30}
+{"name": "atrax", "health": 600.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.6, "hitSize": 13.0, "itemCapacity": 50}
+{"name": "spiroct", "health": 1000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.54, "hitSize": 15.0, "itemCapacity": 60}
+{"name": "arkyid", "health": 8000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.62, "hitSize": 23.0, "itemCapacity": 90}
+{"name": "toxopid", "health": 22000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.5, "hitSize": 26.0, "itemCapacity": 100}
+{"name": "flare", "health": 70.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 2.7, "hitSize": 9.0, "itemCapacity": 10}
+{"name": "horizon", "health": 340.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 1.65, "hitSize": 11.0, "itemCapacity": 0}
+{"name": "zenith", "health": 700.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 1.7, "hitSize": 20.0, "itemCapacity": 80}
+{"name": "antumbra", "health": 7200.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.8, "hitSize": 46.0, "itemCapacity": 180}
+{"name": "eclipse", "health": 22000.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.54, "hitSize": 58.0, "itemCapacity": 230}
+{"name": "mono", "health": 100.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 1.5, "hitSize": 6.0, "itemCapacity": 20}
+{"name": "poly", "health": 400.0, "flying": true, "buildSpeed": 0.4, "fogRadius": 21.75, "speed": 2.6, "hitSize": 9.0, "itemCapacity": 30}
+{"name": "mega", "health": 460.0, "flying": true, "buildSpeed": 2.6, "fogRadius": 21.75, "speed": 2.5, "hitSize": 16.05, "itemCapacity": 60}
+{"name": "quad", "health": 6000.0, "flying": true, "buildSpeed": 2.5, "fogRadius": 21.75, "speed": 1.2, "hitSize": 36.0, "itemCapacity": 140}
+{"name": "oct", "health": 24000.0, "flying": true, "buildSpeed": 4.0, "fogRadius": 21.75, "speed": 0.8, "hitSize": 66.0, "itemCapacity": 260}
+{"name": "risso", "health": 280.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 1.1, "hitSize": 10.0, "itemCapacity": 40}
+{"name": "minke", "health": 600.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.9, "hitSize": 13.0, "itemCapacity": 50}
+{"name": "bryde", "health": 910.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.85, "hitSize": 20.0, "itemCapacity": 80}
+{"name": "sei", "health": 11000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.73, "hitSize": 39.0, "itemCapacity": 150}
+{"name": "omura", "health": 22000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.62, "hitSize": 58.0, "itemCapacity": 230}
+{"name": "retusa", "health": 270.0, "flying": false, "buildSpeed": 1.5, "fogRadius": 21.75, "speed": 0.9, "hitSize": 11.0, "itemCapacity": 40}
+{"name": "oxynoe", "health": 560.0, "flying": false, "buildSpeed": 2.0, "fogRadius": 21.75, "speed": 0.83, "hitSize": 14.0, "itemCapacity": 50}
+{"name": "cyerce", "health": 870.0, "flying": false, "buildSpeed": 2.0, "fogRadius": 21.75, "speed": 0.86, "hitSize": 20.0, "itemCapacity": 80}
+{"name": "aegires", "health": 12000.0, "flying": false, "buildSpeed": 3.0, "fogRadius": 21.75, "speed": 0.7, "hitSize": 44.0, "itemCapacity": 170}
+{"name": "navanax", "health": 20000.0, "flying": false, "buildSpeed": 3.5, "fogRadius": 21.75, "speed": 0.65, "hitSize": 58.0, "itemCapacity": 230}
+{"name": "alpha", "health": 150.0, "flying": true, "buildSpeed": 0.5, "fogRadius": 0.0, "speed": 3.0, "hitSize": 8.0, "itemCapacity": 30}
+{"name": "beta", "health": 170.0, "flying": true, "buildSpeed": 0.75, "fogRadius": 0.0, "speed": 3.3, "hitSize": 9.0, "itemCapacity": 50}
+{"name": "gamma", "health": 220.0, "flying": true, "buildSpeed": 1.0, "fogRadius": 0.0, "speed": 3.55, "hitSize": 11.0, "itemCapacity": 70}
+{"name": "stell", "health": 850.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.75, "hitSize": 12.0, "itemCapacity": 0}
+{"name": "locus", "health": 2100.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.7, "hitSize": 18.0, "itemCapacity": 0}
+{"name": "precept", "health": 5000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.64, "hitSize": 24.0, "itemCapacity": 0}
+{"name": "vanquish", "health": 11000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.63, "hitSize": 28.0, "itemCapacity": 0}
+{"name": "conquer", "health": 22000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.48, "hitSize": 46.0, "itemCapacity": 180}
+{"name": "merui", "health": 680.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.72, "hitSize": 9.0, "itemCapacity": 30}
+{"name": "cleroi", "health": 1100.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.6, "hitSize": 14.0, "itemCapacity": 50}
+{"name": "anthicus", "health": 2700.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 40.0, "speed": 0.65, "hitSize": 21.0, "itemCapacity": 80}
+{"name": "tecta", "health": 6500.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 0.6, "hitSize": 30.0, "itemCapacity": 120}
+{"name": "collaris", "health": 18000.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 1.1, "hitSize": 44.0, "itemCapacity": 170}
+{"name": "elude", "health": 600.0, "flying": false, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 1.8, "hitSize": 11.0, "itemCapacity": 0}
+{"name": "avert", "health": 1100.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 25.0, "speed": 2.0, "hitSize": 12.0, "itemCapacity": 0}
+{"name": "obviate", "health": 2300.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 25.0, "speed": 1.8, "hitSize": 25.0, "itemCapacity": 0}
+{"name": "quell", "health": 6000.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 1.1, "hitSize": 36.0, "itemCapacity": 140}
+{"name": "disrupt", "health": 12000.0, "flying": true, "buildSpeed": -1.0, "fogRadius": 21.75, "speed": 1.0, "hitSize": 46.0, "itemCapacity": 180}
+{"name": "evoke", "health": 300.0, "flying": true, "buildSpeed": 1.2, "fogRadius": 0.0, "speed": 5.6, "hitSize": 9.0, "itemCapacity": 60}
+{"name": "incite", "health": 500.0, "flying": true, "buildSpeed": 1.4, "fogRadius": 0.0, "speed": 7.0, "hitSize": 11.0, "itemCapacity": 90}
+{"name": "emanate", "health": 700.0, "flying": true, "buildSpeed": 1.5, "fogRadius": 0.0, "speed": 7.5, "hitSize": 12.0, "itemCapacity": 110}
