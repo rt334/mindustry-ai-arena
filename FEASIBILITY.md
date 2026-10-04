@@ -102,7 +102,7 @@ getDrillTime = (drillTime + 50 × hardness) / drillMultipliers
 
 ---
 
-## 六、本图可行的目标
+## 五、本图可行的目标
 
 | 资源 | 可达 |
 |---|---|
@@ -119,7 +119,7 @@ getDrillTime = (drillTime + 50 × hardness) / drillMultipliers
 
 ---
 
-## 七、方法论
+## 六、方法论
 
 **这次评估拖到第 17 轮才做，且连续两版出错。**
 
