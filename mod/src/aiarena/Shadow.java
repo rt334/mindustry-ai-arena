@@ -43,6 +43,15 @@ public final class Shadow {
             p = Player.create();
             p.team(team);
             p.name = "AI_" + team.name;
+
+            // 影子玩家只用来满足引擎的 allowAction(player, ...) 权限检查，
+            // 它**不应该有单位**。
+            //
+            // 不置这个标志的话，PlayerComp.update() 会像对待真人一样从核心给它
+            // 生成初始单位 —— 结果每支队伍白得一个单位，而且这个单位没人指挥、
+            // 就杵在核心旁边。这正是「开局白送单位」的来源之一。
+            p.spectator = true;
+
             p.add();
             pool.put(team.id, p);
         }

@@ -1,0 +1,394 @@
+[
+ {
+  "x": 56,
+  "y": 85,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "coal",
+  "rate": 0.343
+ },
+ {
+  "x": 57,
+  "y": 83,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "coal",
+  "rate": 0.343
+ },
+ {
+  "x": 74,
+  "y": 83,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "coal",
+  "rate": 0.343
+ },
+ {
+  "x": 76,
+  "y": 83,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "coal",
+  "rate": 0.343
+ },
+ {
+  "x": 75,
+  "y": 81,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "coal",
+  "rate": 0.257
+ },
+ {
+  "x": 57,
+  "y": 76,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "coal",
+  "rate": 0.343
+ },
+ {
+  "x": 55,
+  "y": 75,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "coal",
+  "rate": 0.343
+ },
+ {
+  "x": 57,
+  "y": 74,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "coal",
+  "rate": 0.257
+ },
+ {
+  "x": 54,
+  "y": 115,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 52,
+  "y": 114,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 55,
+  "y": 117,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 50,
+  "y": 114,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.185
+ },
+ {
+  "x": 52,
+  "y": 116,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 55,
+  "y": 119,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 50,
+  "y": 116,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.092
+ },
+ {
+  "x": 54,
+  "y": 86,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 52,
+  "y": 85,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 54,
+  "y": 84,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 50,
+  "y": 85,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 47,
+  "y": 87,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 44,
+  "y": 90,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 45,
+  "y": 88,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "copper",
+  "rate": 0.369
+ },
+ {
+  "x": 60,
+  "y": 107,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.185
+ },
+ {
+  "x": 57,
+  "y": 105,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.185
+ },
+ {
+  "x": 58,
+  "y": 107,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.092
+ },
+ {
+  "x": 57,
+  "y": 102,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.092
+ },
+ {
+  "x": 52,
+  "y": 109,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.369
+ },
+ {
+  "x": 52,
+  "y": 111,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.369
+ },
+ {
+  "x": 50,
+  "y": 108,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.369
+ },
+ {
+  "x": 50,
+  "y": 110,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.369
+ },
+ {
+  "x": 50,
+  "y": 112,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.369
+ },
+ {
+  "x": 48,
+  "y": 109,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.369
+ },
+ {
+  "x": 48,
+  "y": 111,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.369
+ },
+ {
+  "x": 46,
+  "y": 111,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.277
+ },
+ {
+  "x": 52,
+  "y": 118,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.369
+ },
+ {
+  "x": 53,
+  "y": 120,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "lead",
+  "rate": 0.369
+ },
+ {
+  "x": 64,
+  "y": 102,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.1
+ },
+ {
+  "x": 60,
+  "y": 108,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.4
+ },
+ {
+  "x": 63,
+  "y": 100,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.1
+ },
+ {
+  "x": 65,
+  "y": 100,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.4
+ },
+ {
+  "x": 58,
+  "y": 109,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.4
+ },
+ {
+  "x": 60,
+  "y": 110,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.4
+ },
+ {
+  "x": 56,
+  "y": 108,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.1
+ },
+ {
+  "x": 58,
+  "y": 111,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.4
+ },
+ {
+  "x": 56,
+  "y": 110,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.4
+ },
+ {
+  "x": 61,
+  "y": 112,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.1
+ },
+ {
+  "x": 59,
+  "y": 113,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.4
+ },
+ {
+  "x": 70,
+  "y": 102,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.1
+ },
+ {
+  "x": 70,
+  "y": 106,
+  "block": "mechanical-drill",
+  "size": 2,
+  "item": "sand",
+  "rate": 0.1
+ }
+]

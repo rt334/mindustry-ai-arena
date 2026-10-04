@@ -104,14 +104,43 @@ public final class Snapshot {
         /** 当前指令名。 */
         public final String command;
 
+        /**
+         * 是否正在开火。玩家看得见单位在射击（枪口火光、弹道），无条件公平。
+         */
+        public final boolean shooting;
+        /**
+         * 当前交战目标的位置；NaN 表示没有目标。
+         *
+         * 对等性：玩家看得见弹道往哪飞，所以「朝哪个方向打」是可见信息。
+         */
+        public final float targetX, targetY;
+        /** 目标的实体 id / 类型 / 队伍；目标不可见时由输出层清空。 */
+        public final int targetId;
+        public final String targetType;
+        public final int targetTeam;
+        /**
+         * 弹药。UnitType.ammoCapacity 默认就是 1，UnitComp.ammof() 对普通单位
+         * 恒返回 1 —— 所以 flare/gamma 这类单位这里永远是 1/1。
+         * 只有方块单位（BlockUnitUnit）才真的会用这个值。
+         */
+        public final float ammo;
+        public final int ammoCapacity;
+
         UnitInfo(int id, String type, int team, float x, float y,
                  float health, float maxHealth, float rotation, boolean canBuild,
-                 String[] stackItems, int[] stackAmounts, int controllerId, String command) {
+                 String[] stackItems, int[] stackAmounts, int controllerId, String command,
+                 boolean shooting, float targetX, float targetY,
+                 int targetId, String targetType, int targetTeam,
+                 float ammo, int ammoCapacity) {
             this.id = id; this.type = type; this.team = team; this.x = x; this.y = y;
             this.health = health; this.maxHealth = maxHealth;
             this.rotation = rotation; this.canBuild = canBuild;
             this.stackItems = stackItems; this.stackAmounts = stackAmounts;
             this.controllerId = controllerId; this.command = command;
+            this.shooting = shooting;
+            this.targetX = targetX; this.targetY = targetY;
+            this.targetId = targetId; this.targetType = targetType; this.targetTeam = targetTeam;
+            this.ammo = ammo; this.ammoCapacity = ammoCapacity;
         }
     }
 
@@ -133,12 +162,39 @@ public final class Snapshot {
         public final boolean constructing;
         /** 正在施工时的进度 0~1。 */
         public final float buildProgress;
+        /**
+         * 方块朝向 0~3（0=东 1=北 2=西 3=南）。
+         *
+         * 对等性：玩家看得见任何可见建筑的朝向 —— 传送带往哪流、
+         * 炮塔朝哪边、工厂从哪边吐单位，全是画在屏幕上的。
+         */
+        public final int rotation;
+        /**
+         * 电力满足度 0~1。玩家选中建筑能看到电力条，无条件可见。
+         * 没有电力模块时为 -1。
+         */
+        public final float powerStatus;
+        /**
+         * 电力连线对端坐标，Point2.pack 打包。
+         *
+         * 对等性：PowerNode.draw() 只对**通过迷雾检查的建筑**调用，
+         * 而可见节点的激光线会一直画到对端真实坐标：
+         *     for(int i = 0; i < power.links.size; i++){
+         *         Building link = world.build(power.links.get(i));
+         *         drawLaser(x, y, link.x, link.y, size, link.block.size);
+         *     }
+         * 所以「可见节点的连线位置」是玩家能看到的。
+         * 但**对端建筑本身在雾里时是黑的** —— 只知位置，不知是什么方块。
+         * 这个区分留给读取方（visibleBuildings 会按队伍逐条判 visible）。
+         */
+        public final int[] powerLinks;
 
         BuildInfo(int x, int y, int team, String block,
                   float health, float maxHealth, boolean enabled, float efficiency,
                   String[] items, int[] itemAmounts,
                   String[] liquids, float[] liquidAmounts,
-                  String config, boolean constructing, float buildProgress) {
+                  String config, boolean constructing, float buildProgress,
+                  int rotation, float powerStatus, int[] powerLinks) {
             this.x = x; this.y = y; this.team = team; this.block = block;
             this.health = health; this.maxHealth = maxHealth;
             this.enabled = enabled; this.efficiency = efficiency;
@@ -146,6 +202,9 @@ public final class Snapshot {
             this.liquids = liquids; this.liquidAmounts = liquidAmounts;
             this.config = config; this.constructing = constructing;
             this.buildProgress = buildProgress;
+            this.rotation = rotation;
+            this.powerStatus = powerStatus;
+            this.powerLinks = powerLinks;
         }
     }
 
@@ -243,10 +302,31 @@ public final class Snapshot {
                 cmd = cai.command.name;
             }
 
+            // 开火状态 + 交战目标。
+            // attackTarget 挂在 CommandAI 上（CommandAI.java:27），
+            // isShooting 在 WeaponsComp（WeaponsComp.java:20）。
+            boolean shooting = u.isShooting();
+            float tx = Float.NaN, ty = Float.NaN;
+            int tid = -1;
+            String ttype = "";
+            int tteam = -1;
+            if (c instanceof mindustry.ai.types.CommandAI cai && cai.attackTarget != null) {
+                var at = cai.attackTarget;
+                if (at instanceof mindustry.gen.Unit au) {
+                    tx = au.x; ty = au.y; tid = au.id; ttype = au.type.name; tteam = au.team.id;
+                } else if (at instanceof mindustry.gen.Building ab) {
+                    tx = ab.x; ty = ab.y; tid = ab.id; ttype = ab.block.name; tteam = ab.team.id;
+                } else {
+                    tx = at.getX(); ty = at.getY();
+                }
+            }
+
             out[i++] = new UnitInfo(
                 u.id, u.type.name, u.team.id, u.x, u.y,
                 u.health, u.maxHealth, u.rotation, u.canBuild(),
-                stItems, stAmts, ctrl, cmd);
+                stItems, stAmts, ctrl, cmd,
+                shooting, tx, ty, tid, ttype, tteam,
+                u.ammof(), u.type.ammoCapacity);
         }
         if (i == out.length) return out;
         UnitInfo[] trimmed = new UnitInfo[i];
@@ -314,10 +394,23 @@ public final class Snapshot {
                     ? ((mindustry.world.blocks.ConstructBlock.ConstructBuild) b).progress
                     : 1f;
 
+                // 电力连线：只在有电力模块时采集。玩家看到的激光线就是这份数据。
+                float pstat = -1f;
+                int[] plinks = null;
+                if (b.power != null) {
+                    pstat = b.power.status;
+                    var lk = b.power.links;
+                    if (lk != null && lk.size > 0) {
+                        plinks = new int[lk.size];
+                        for (int li = 0; li < lk.size; li++) plinks[li] = lk.get(li);
+                    }
+                }
+
                 list.add(new BuildInfo(
                     b.tileX(), b.tileY(), b.team.id, b.block.name,
                     b.health, b.maxHealth, b.enabled, b.efficiency,
-                    iNames, iAmts, lNames, lVals, cfg, constructing, progress));
+                    iNames, iAmts, lNames, lVals, cfg, constructing, progress,
+                    b.rotation, pstat, plinks));
             }
         }
         return list.toArray(BuildInfo.class);

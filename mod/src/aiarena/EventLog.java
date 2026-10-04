@@ -148,7 +148,7 @@ public final class EventLog {
 
     // ---------------------------------------------------------------- write
 
-    private static void add(String type, int teamId, float x, float y, String detail) {
+    static void add(String type, int teamId, float x, float y, String detail) {
         try {
             synchronized (lock) {
                 long seq = nextSeq++;
@@ -216,13 +216,48 @@ public final class EventLog {
     /** 事件是否对观察方可见。 */
     private static boolean visible(Ev ev, Team viewer) {
         if (viewer == null) return true;                    // 裁判：全见
+
+        // 视野事件是**私有**的：只给产生它的那一队。
+        //
+        // ⚠ 不能走下面的「位置在我视野内就可见」规则。实测：
+        // 102/103 队的核心看见了 sharded 的 gamma，于是产生 unitSpotted
+        // （teamId=102），而那个位置正好在 sharded 自己基地里 ——
+        // 按位置规则就泄漏给了 sharded。结果 sharded 会看到一串
+        // 「有人看见了我的单位」，而「谁在看我」这件事本身是对手的情报。
+        //
+        // 视野进出天然是一队的私有状态，不是世界里发生的公开事件。
+        if (isVisionEvent(ev.type)) {
+            return ev.teamId == viewer.id;
+        }
+
         if (ev.teamId == viewer.id) return true;            // 自己的事总是知道
         if (!Vars.state.rules.fog) return true;             // 无迷雾
         if (Float.isNaN(ev.x)) return false;                // 无位置且非己方 → 不透露
         return Vars.fogControl.isVisible(viewer, ev.x, ev.y);
     }
 
+    private static boolean isVisionEvent(String type) {
+        return type.endsWith("Spotted") || type.endsWith("Lost");
+    }
+
     /** 当前最新序号。 */
+    /** 最近 n 条事件的 JSON 数组。供 WebSocket 的 events 频道使用。 */
+    public static String recentJson(int n) {
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        synchronized (lock) {
+            long from = Math.max(firstSeq, nextSeq - n);
+            for (long s = from; s < nextSeq; s++) {
+                Ev e = ring[(int) (s % CAPACITY)];
+                if (e == null) continue;
+                if (!first) sb.append(',');
+                first = false;
+                sb.append(e.toJson());
+            }
+        }
+        return sb.append(']').toString();
+    }
+
     public static long lastSeq() {
         synchronized (lock) { return nextSeq - 1; }
     }

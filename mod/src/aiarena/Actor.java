@@ -126,11 +126,59 @@ public final class Actor {
         }
 
         try {
-            build.configureAny(value);
-            return Result.ok("configured " + build.block.name + " at (" + x + "," + y + ")");
+            Object resolved = resolveConfigValue(build, value);
+            build.configureAny(resolved);
+            return Result.ok("configured " + build.block.name + " at (" + x + "," + y + ")"
+                             + " with " + describeConfig(resolved));
         } catch (Throwable t) {
             return Result.err(1500, "configure failed: " + t);
         }
+    }
+
+    /**
+     * 把 HTTP 传来的字符串解析成引擎认识的配置对象。
+     *
+     * 不能直接把字符串丢给 configureAny：BuildingComp.configured() 是按
+     * value.getClass() 去查 block.configurations 的，而 UnitFactory 注册的是
+     * UnitType.class / Integer.class —— 传 String 一律匹配不上，配置会静默失效。
+     *
+     * 所以按方块**声明的配置类型**来决定怎么解析：
+     *   声明了 UnitType  -> 按单位名解析（工厂选产线就是这个）
+     *   声明了 Integer   -> 按序号解析
+     *   其它             -> 原样传字符串（分拣器之类）
+     */
+    private static Object resolveConfigValue(Building build, String value) {
+        var configs = build.block.configurations;
+
+        if (configs.containsKey(mindustry.type.UnitType.class)) {
+            var ut = Vars.content.unit(value.trim());
+            if (ut != null) return ut;
+            // 工厂也支持用 plan 序号配置
+            try { return Integer.parseInt(value.trim()); } catch (NumberFormatException ignored) {}
+        }
+
+        if (configs.containsKey(Integer.class)) {
+            try { return Integer.parseInt(value.trim()); } catch (NumberFormatException ignored) {}
+        }
+
+        if (configs.containsKey(mindustry.type.Item.class)) {
+            var it = Vars.content.item(value.trim());
+            if (it != null) return it;
+        }
+
+        if (configs.containsKey(Block.class)) {
+            var bl = Vars.content.block(value.trim());
+            if (bl != null) return bl;
+        }
+
+        return value;
+    }
+
+    private static String describeConfig(Object resolved) {
+        if (resolved instanceof mindustry.type.UnitType ut) return "unit=" + ut.name;
+        if (resolved instanceof mindustry.type.Item it) return "item=" + it.name;
+        if (resolved instanceof Block b) return "block=" + b.name;
+        return resolved == null ? "null" : String.valueOf(resolved);
     }
 
     // ---------------------------------------------------------------- helpers

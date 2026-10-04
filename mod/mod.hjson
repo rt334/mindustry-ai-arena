@@ -3,5 +3,15 @@ displayName: "AI Arena"
 author: rt334
 description: "多 AI PvP 竞技场：HTTP 接口 + 对等约束 + 观战/回放"
 version: "0.1.0"
-minGameVersion: "146"
+
+# Java class mod 的门槛是 154（Vars.minJavaModGameVersion），
+# 低于它客户端会直接判为不兼容。跟随当前游戏版本。
+minGameVersion: "160"
+
+# 服务器专用，不进双方的 mod 兼容比对列表。
+# Mindustry 会逐项比对客户端与服务器的 mod 列表，不标 hidden 的话
+# 「服务器装了而客户端没装」会被直接踢掉（实测报 Incompatible mods）。
+# 代价：hidden mod 不能添加内容（方块/单位等）—— 本 mod 只用引擎 API，符合限制。
+hidden: true
+
 main: aiarena.AIArenaMod

@@ -3,5 +3,14 @@ displayName: "AI Arena Observer"
 author: rt334
 description: "AI 竞技场观战端：自由相机 + 视角切换，只读不参与"
 version: "0.1.0"
-minGameVersion: "146"
+
+# Java class mod 的门槛是 154（Vars.minJavaModGameVersion），
+# 低于它客户端会直接判为不兼容。跟随当前游戏版本。
+minGameVersion: "160"
+
+# 客户端专用，不进双方的 mod 兼容比对列表。
+# 服务器没有装它，不标 hidden 的话客户端会被判为「多余的 mod」踢掉。
+# 代价：hidden mod 不能添加内容（方块/单位等）—— 本 mod 只读引擎状态，符合限制。
+hidden: true
+
 main: aiobserver.ObserverMod

@@ -212,6 +212,17 @@ public final class Operations {
      * （那是"玩家重生"语义，会绑定到该玩家）。
      */
     public static Actor.Result spawn(Team team, String unitTypeName, float x, float y) {
+        return spawn(team, unitTypeName, x, y, false);
+    }
+
+    /**
+     * @param adminForce 跳过可见性校验。**仅裁判用** —— 裁判是比赛组织者，
+     *                   需要能在任何位置布置单位（例如摆测试场景、恢复局面）。
+     *                   它属于 derelict 队、本身没有任何视野，不放开的话
+     *                   连「在自家基地旁边放一个单位」都做不到。
+     *                   普通 agent 一律走完整校验。
+     */
+    public static Actor.Result spawn(Team team, String unitTypeName, float x, float y, boolean adminForce) {
         if (!Vars.state.isPlaying()) return Actor.Result.err(1005, "game not in playing state");
 
         UnitType ut = Vars.content.unit(unitTypeName);
@@ -220,8 +231,8 @@ public final class Operations {
 
         int tx = mindustry.core.World.toTile(x), ty = mindustry.core.World.toTile(y);
 
-        // 约束 1：可见
-        if (Vars.state.rules.fog && !Vars.fogControl.isVisible(team, x, y)) {
+        // 约束 1：可见（裁判可强制跳过，见 adminForce 说明）
+        if (!adminForce && Vars.state.rules.fog && !Vars.fogControl.isVisible(team, x, y)) {
             return Actor.Result.err(1005, "spawn point tile(" + tx + "," + ty + ") is not visible to " + team.name);
         }
 

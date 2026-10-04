@@ -138,10 +138,23 @@ public final class HttpApi {
                 case "control"   -> handleControl(ex, agent);
                 case "events"    -> handleEvents(ex, agent);
                 case "spawn"     -> handleSpawn(ex, agent);
+                case "factory"   -> handleFactory(ex, agent);
+                case "mine"      -> handleMine(ex, agent);
+                case "drill"     -> handleDrill(ex, agent);
+                case "block"     -> handleBlock(ex, agent);
+                case "database"  -> handleDatabase(ex, agent);
+                case "rates"     -> handleRates(ex, agent);
+                case "stalls"    -> handleStalls(ex, agent);
+                case "ore"       -> handleOre(ex, agent);
                 case "chat"      -> handleChat(ex, agent);
                 case "queue"     -> handleQueue(ex, agent);
                 case "observe"   -> handleObserve(ex, agent);
                 case "record"    -> handleRecord(ex, agent);
+                case "host"      -> handleHost(ex, agent);
+                case "start"     -> handleStart(ex, agent);
+                case "fog"       -> handleFog(ex, agent);
+                case "admin"     -> handleAdmin(ex, agent);
+                case "diag"      -> handleDiag(ex, agent);
                 default       -> respond(ex, 404, Json.error(1002, "unknown action: " + action));
             }
         } catch (Throwable t) {
@@ -314,15 +327,36 @@ public final class HttpApi {
                     if (visible) {
                         o.put("visible", true);
                         o.put("floor", t.floor().name);
+                        // 矿石在 overlay 层，不在 block 层 —— Mindustry 用
+                        // tile.setOverlay() 放 OreBlock，tile.block() 拿不到。
+                        // 早期版本只返回 block，导致整张图上矿石完全消失。
+                        var ov = t.overlay();
+                        o.put("overlay", ov == null ? "air" : ov.name);
+                        // drop = 在这里放矿机**实际会产出什么**。
+                        // 这是 Drill.canMine 用的同一个 tile.drop()：
+                        //   矿石 -> overlay.itemDrop
+                        //   沙地 -> floor.itemDrop（darksand/sand-floor 给 sand）
+                        // 只看 overlay 会漏掉沙地，而硅冶炼厂吃的正是 煤 + 沙。
+                        var dr0 = t.drop();
+                        o.put("drop", dr0 == null ? "" : dr0.name);
+                        o.put("dropHardness", dr0 == null ? -1 : dr0.hardness);
                         o.put("block", t.block().name);
+                        putLiquidInfo(o, t);
                         o.put("team", t.team().name);
                         o.put("build", t.build != null);
                     } else {
                         o.put("visible", false);
                         o.put("discovered", discovered);
                         if (discovered) {
-                            // 地形是探索过的记忆，玩家能看到；方块与队伍不给
+                            // 地形、矿石、液体都是探索过的记忆，玩家能看到；
+                            // 方块与队伍不给
                             o.put("floor", t.floor().name);
+                            var ov2 = t.overlay();
+                            o.put("overlay", ov2 == null ? "air" : ov2.name);
+                            var dr1 = t.drop();
+                            o.put("drop", dr1 == null ? "" : dr1.name);
+                            o.put("dropHardness", dr1 == null ? -1 : dr1.hardness);
+                            putLiquidInfo(o, t);
                             o.put("block", "<unknown>");
                         }
                     }
@@ -484,28 +518,112 @@ public final class HttpApi {
      *
      * POST /spawn?type=<unitType>&x=&y=
      */
+    /**
+     * 生成单位。POST /spawn?type=<unit>&x=<tileX>&y=<tileY>
+     *
+     * x/y 是**格坐标**，与 /place、/command、/config 保持一致。
+     *
+     * 早期版本把 x/y 直接当世界像素传给 Operations.spawn，
+     * 于是 /spawn?x=60&y=103 被 World.toTile(60) 解释成格 (8,13) ——
+     * 在一张 350x200 的图上跑到了角落，报「not visible」。
+     * 现在统一在入口处转换，Operations 仍收世界坐标（与引擎一致）。
+     */
     private static void handleSpawn(HttpExchange ex, AIArena.Agent agent) {
         Params p = Params.of(ex);
+
+        // 单位必须由工厂生产，不能凭空召唤。
+        //
+        // 直接 spawn 绕过了整套产能：没有建造时间、不需要电力、不需要工厂，
+        // 于是「谁先攒出产能」这个维度直接消失，对局退化成两个脚本对撞。
+        // 想调试时用 -Darena.allowspawn=true 显式打开。
+        if (!AIArena.ALLOW_DIRECT_SPAWN) {
+            respond(ex, 403, Json.error(1005,
+                "direct unit spawning is disabled: units must be produced by a factory. "
+              + "Build one (air-factory / ground-factory / naval-factory), give it power, "
+              + "select a plan with /config?x=<tileX>&y=<tileY>&value=<unitName>, "
+              + "then let it produce. "
+              + "Server-side override: -Darena.allowspawn=true"));
+            return;
+        }
+
         String type = p.get("type", null);
         if (type == null) { respond(ex, 400, Json.error(1001, "required: type")); return; }
 
-        float x = p.getFloat("x", Float.NaN);
-        float y = p.getFloat("y", Float.NaN);
-        Team team = agent.team();
+        float tx = p.getFloat("x", Float.NaN);
+        float ty = p.getFloat("y", Float.NaN);
+
+        // 队伍：默认是调用方自己的队。裁判可以用 team= 指定**替哪一队**生成 ——
+        // 它自己属于 derelict，那队单位上限是 0，不指定的话连一个都放不出来。
+        // 组织比赛本来就需要能在任意位置为任意队伍布置单位。
+        Team team;
+        String teamParam = p.get("team", null);
+        if (agent.admin && teamParam != null) {
+            try {
+                team = Team.get(Integer.parseInt(teamParam.trim()));
+            } catch (NumberFormatException nfe) {
+                respond(ex, 400, Json.error(1001, "bad team id: " + teamParam));
+                return;
+            }
+        } else {
+            team = agent.team();
+        }
         if (team == null) { respond(ex, 403, Json.error(1403, "agent has no team")); return; }
 
         postToGame(ex, () -> {
-            // 未给坐标时，用核心位置
-            float sx = x, sy = y;
-            if (Float.isNaN(sx) || Float.isNaN(sy)) {
+            float sx, sy;
+
+            if (Float.isNaN(tx) || Float.isNaN(ty)) {
+                // 未给坐标：在核心周围找一块空地。
+                // 注意 core-nucleus 是 5x5，核心自身占据的格全是 solid，
+                // 所以必须往外找，不能用 core.tileX()/tileY() 本身。
                 var core = team.core();
                 if (core == null) return Json.error(1005, "team " + team.name + " has no core");
-                sx = core.x; sy = core.y;
+
+                var ut0 = Vars.content.unit(type);
+                boolean flying = ut0 != null && ut0.flying;
+                int[] spot = findSpawnSpot(core.tileX(), core.tileY(), flying);
+                if (spot == null) return Json.error(1004, "no free spawn tile near core");
+                // 不能加 tilesize/2 取格中心：World.toTile 用的是 Math.round，
+                // 加半格会被进位到下一格（59*8+4=476 → round(59.5)=60）。
+                sx = spot[0] * Vars.tilesize + 1f;
+                sy = spot[1] * Vars.tilesize + 1f;
+            } else {
+                // 格坐标 -> 世界坐标。
+                // 注意不能加 tilesize/2：World.toTile 用 Math.round，加半格会进位到下一格。
+                sx = tx * Vars.tilesize + 1f;
+                sy = ty * Vars.tilesize + 1f;
             }
-            Actor.Result r = Operations.spawn(team, type, sx, sy);
+
+            // 裁判可强制生成（它属于 derelict 队，本身没有视野）
+            Actor.Result r = Operations.spawn(team, type, sx, sy, agent.admin);
             return r.ok ? Json.ok(new Json.Obj().put("message", r.message).toString())
                         : Json.error(r.code, r.message);
         });
+    }
+
+    /**
+     * 在给定格周围螺旋搜索一个可以生成单位的格子。
+     *
+     * 飞行单位只需不越界且不在建筑里；地面单位还要求该格非 solid 且不是深水。
+     */
+    private static int[] findSpawnSpot(int cx, int cy, boolean flying) {
+        int w = Vars.world.width(), h = Vars.world.height();
+        for (int r = 1; r < 40; r++) {
+            for (int dy = -r; dy <= r; dy++) {
+                for (int dx = -r; dx <= r; dx++) {
+                    // 只检查当前这一圈的边框
+                    if (Math.abs(dx) != r && Math.abs(dy) != r) continue;
+                    int x = cx + dx, y = cy + dy;
+                    if (x < 1 || y < 1 || x >= w - 1 || y >= h - 1) continue;
+                    Tile t = Vars.world.tile(x, y);
+                    if (t == null) continue;
+                    if (t.solid()) continue;                       // 别生成在建筑里
+                    if (!flying && t.floor().isDeep()) continue;   // 地面单位不能站深水
+                    return new int[]{x, y};
+                }
+            }
+        }
+        return null;
     }
 
     /** 发送聊天消息。POST /chat?text=... */
@@ -543,6 +661,1007 @@ public final class HttpApi {
         });
     }
 
+    /**
+     * 手动挖矿。走原版 MinerComp 路径。POST /v1/{agent}/mine
+     *
+     *   POST /mine?unit=<id>&x=<tileX>&y=<tileY>   让该单位去挖这一格
+     *   POST /mine?unit=<id>&clear=true            停止挖矿
+     *
+     * 为什么是「原版实现」：mineTile 就是 MinerComp 里那个 @SyncLocal 字段，
+     * 玩家用鼠标挖矿时输入处理器写的就是它。这里只是把它设上，剩下全交给
+     * MinerComp.update() —— 挖矿速率、矿脉判定、硬度和 mineTier 的比较、
+     * 以及 offloadImmediately()（玩家控制的单位会把矿直接送进 mineTransferRange
+     * 内的核心）都是引擎自己的逻辑，没有一行是我模拟的。
+     *
+     * 这条路径存在的意义是**启动资金**：开局核心库存只够放几个建筑，
+     * 想造矿机和传送带得先有料，而料只能从手动挖矿来。
+     */
+    /**
+     * 矿机状态。GET /v1/{agent}/drill
+     *
+     * 为什么要单独一个端点：/buildings 只给通用的 items/efficiency，看不出
+     * 「矿机到底在不在挖、挖的是什么、为什么挖不动」。实测两次卡死都是这个：
+     *
+     *   1. 矿机满仓推不出去 —— items=10 但看不出是 dump 失败
+     *   2. 选到了 ore-thorium，mechanical-drill 的 tier=2 挖不动硬度 4 的钍
+     *
+     * 这里把 Drill.DrillBuild 的关键字段直接摊开：
+     *   dominantItem   脚下占多数的矿种（null = 矿机上没有矿）
+     *   dominantItems  脚下矿格数
+     *   tier           方块可挖硬度上限
+     *   oreHardness    脚下矿的硬度
+     *   canMine        tier >= oreHardness
+     *   progress       钻井进度（0..1，到 1 出一个矿）
+     *   warmup         预热（0..1，刚放下的机器要爬升）
+     *   lastDrillSpeed 当前产出速率（个/秒）
+     *   full           缓冲区是否满了
+     */
+    /**
+     * 方块资料 + 配方。GET /v1/{agent}/block?name=<blockName>
+     *
+     * 资料来自 UnlockableContent（localizedName / description / details），
+     * 就是游戏内点开方块看到的那些文字。
+     *
+     * 配方从两个地方拼：
+     *   输入 —— Block.consumers 数组，逐个判类型
+     *     ConsumeItems        固定物品
+     *     ConsumeItemDynamic  动态（UnitFactory 按当前产线变），静态查不出具体物品
+     *     ConsumeItemFilter   按谓词过滤
+     *     ConsumeLiquid(s)    液体
+     *     ConsumePower        电力
+     *   输出 —— GenericCrafter.outputItems / outputLiquids，
+     *            UnitFactory.plans（单位 + 耗时 + 材料）
+     *
+     * 不带 name 时返回全部可建方块的精简版（只有名字和尺寸），避免响应过大。
+     */
+    /**
+     * 物品速率。窗口内「产了多少 / 耗了多少」。
+     *
+     *   GET /rates?window=10          默认 10 秒
+     *
+     * 返回 core（核心库存变化，= 净产出）和 stored（全队建筑库存变化，含在途）。
+     * 两者对照就能定位瓶颈：
+     *   core 不涨 + stored 涨  -> 东西堵在产线里
+     *   core 涨   + stored 平  -> 健康
+     *   两者都不涨              -> 上游没在挖
+     */
+    private static void handleRates(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+        double window = p.getFloat("window", 10f);
+        if (window < 0.5) window = 0.5;
+        if (window > 110) window = 110;
+
+        Team team = agent.team();
+        if (team == null) { respond(ex, 403, Json.error(1403, "agent has no team")); return; }
+
+        // 裁判可以指定队伍
+        String teamParam = p.get("team", null);
+        if (agent.admin && teamParam != null) {
+            try { team = Team.get(Integer.parseInt(teamParam.trim())); } catch (Throwable ignored) {}
+        }
+
+        respond(ex, 200, Json.ok(new Json.Obj()
+            .put("agent", agent.id)
+            .putRaw("rates", RateTracker.ratesJson(team, window))
+            .toString()));
+    }
+
+    /**
+     * 传送带堵塞报警。
+     *
+     *   GET /stalls            当前所有堵住的传送带
+     *
+     * 判据是引擎自己的 clogHeat（涨到 1 约等于堵了 1 秒）。
+     * 每条给出位置、朝向、压着的物品、堵了多久，以及**出料侧是什么方块、
+     * 它是否接受物品** —— 后者才是定位堵塞原因的关键。
+     *
+     * 堵塞同时也会进事件流（type=stall），所以可以 /events?since= 增量拉。
+     */
+    private static void handleStalls(HttpExchange ex, AIArena.Agent agent) {
+        respond(ex, 200, Json.ok(new Json.Obj()
+            .put("agent", agent.id)
+            .put("stalledCount", StallWatch.stalledCount())
+            .putRaw("stalls", StallWatch.stallsJson())
+            .toString()));
+    }
+
+    // ================================================================ 核心数据库
+    //
+    // 对应游戏内的「核心数据库」（Database）界面：查内容、看介绍、看配方，
+    // 以及**反查** —— 「什么东西能产硅」「谁在吃煤」。
+    //
+    // 和 /content、/block 的分工：
+    //   /content        全量清单，一次拿完，适合开局缓存
+    //   /block?name=    单个方块的详情（配方 + 介绍）
+    //   /database       **可检索** + **反查产线**，适合按需问
+    //
+    // 反查是这个接口真正的价值：AI 要决定「缺硅怎么办」，
+    // 光知道 silicon-smelter 的配方没用，得知道「谁能产硅」；
+    // 反过来要规划物料流向，又得知道「谁会吃铜」。
+
+    private static void handleDatabase(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+
+        String q = p.get("q", null);
+        String itemName = p.get("item", null);
+        String blockName = p.get("block", null);
+        String catName = p.get("cat", null);
+        String type = p.get("type", null);        // block|item|unit|liquid
+        int limit = Math.min(Math.max(p.getInt("limit", 60), 1), 400);
+
+        ensureBundle();
+
+        // ---- 反查：这个物品谁产、谁吃 ----
+        if (itemName != null) {
+            mindustry.type.Item it = Vars.content.item(itemName);
+            if (it == null) { respond(ex, 404, Json.error(1002, "unknown item: " + itemName)); return; }
+
+            StringBuilder producers = new StringBuilder("[");
+            StringBuilder consumers = new StringBuilder("[");
+            boolean pf = true, cf = true;
+            int pn = 0, cn = 0;
+
+            for (Block b : Vars.content.blocks()) {
+                if (b.isHidden()) continue;
+                if (blockProducesItem(b, it)) {
+                    if (!pf) producers.append(',');
+                    pf = false; pn++;
+                    producers.append(new Json.Obj()
+                        .put("name", b.name)
+                        .put("localizedName", blockNameOf(b))
+                        .put("category", b.category == null ? "" : b.category.name())
+                        .put("size", b.size)
+                        .put("how", productionKind(b, it))
+                        .toString());
+                }
+                if (blockConsumesItem(b, it)) {
+                    if (!cf) consumers.append(',');
+                    cf = false; cn++;
+                    consumers.append(new Json.Obj()
+                        .put("name", b.name)
+                        .put("localizedName", blockNameOf(b))
+                        .put("category", b.category == null ? "" : b.category.name())
+                        .put("size", b.size)
+                        .put("how", consumptionKind(b, it))
+                        .toString());
+                }
+            }
+            producers.append(']');
+            consumers.append(']');
+
+            // 矿物的硬度决定要几级矿机 —— 这也是「谁产它」的一部分
+            StringBuilder drills = new StringBuilder("[");
+            boolean df = true;
+            for (Block b : Vars.content.blocks()) {
+                if (b instanceof mindustry.world.blocks.production.Drill dr && dr.tier >= it.hardness) {
+                    if (!df) drills.append(',');
+                    df = false;
+                    drills.append(new Json.Obj()
+                        .put("name", b.name).put("localizedName", blockNameOf(b))
+                        .put("tier", dr.tier).put("size", dr.size).toString());
+                }
+            }
+            drills.append(']');
+
+            respond(ex, 200, Json.ok(new Json.Obj()
+                .put("agent", agent.id)
+                .put("item", it.name)
+                .put("localizedName", itemNameOf(it))
+                .put("description", itemDescOf(it))
+                .put("hardness", it.hardness)
+                .put("explosiveness", it.explosiveness)
+                .put("flammability", it.flammability)
+                .put("radioactivity", it.radioactivity)
+                .put("charge", it.charge)
+                .put("cost", it.cost)
+                .put("producerCount", pn)
+                .putRaw("producers", producers.toString())
+                .put("consumerCount", cn)
+                .putRaw("consumers", consumers.toString())
+                .putRaw("drills", drills.toString())
+                .toString()));
+            return;
+        }
+
+        // ---- 搜索：名字或介绍里含关键词 ----
+        if (q != null && !q.isEmpty()) {
+            String needle = q.toLowerCase(java.util.Locale.ROOT);
+            StringBuilder hits = new StringBuilder("[");
+            boolean hf = true;
+            int n = 0;
+
+            java.util.function.BiConsumer<String, Object[]> consider = (kind, tuple) -> {};
+            // 直接展开写，避免闭包里改外部变量
+            for (Block b : Vars.content.blocks()) {
+                if (b.isHidden() || n >= limit) continue;
+                if (!matches(needle, b.name, blockNameOf(b), blockDescOf(b))) continue;
+                if (!hf) hits.append(',');
+                hf = false; n++;
+                hits.append(new Json.Obj().put("type", "block").put("name", b.name)
+                    .put("localizedName", blockNameOf(b))
+                    .put("category", b.category == null ? "" : b.category.name())
+                    .put("size", b.size).toString());
+            }
+            for (mindustry.type.Item i : Vars.content.items()) {
+                if (n >= limit) break;
+                if (!matches(needle, i.name, itemNameOf(i), itemDescOf(i))) continue;
+                if (!hf) hits.append(',');
+                hf = false; n++;
+                hits.append(new Json.Obj().put("type", "item").put("name", i.name)
+                    .put("localizedName", itemNameOf(i))
+                    .put("hardness", i.hardness).toString());
+            }
+            for (mindustry.type.UnitType u : Vars.content.units()) {
+                if (u.isHidden() || n >= limit) continue;
+                if (!matches(needle, u.name, unitNameOf(u), unitDescOf(u))) continue;
+                if (!hf) hits.append(',');
+                hf = false; n++;
+                hits.append(new Json.Obj().put("type", "unit").put("name", u.name)
+                    .put("localizedName", unitNameOf(u))
+                    .put("health", u.health).put("flying", u.flying)
+                    .put("buildSpeed", u.buildSpeed).toString());
+            }
+            for (mindustry.type.Liquid l : Vars.content.liquids()) {
+                if (l.isHidden() || n >= limit) continue;
+                if (!matches(needle, l.name, liquidNameOf(l), liquidDescOf(l))) continue;
+                if (!hf) hits.append(',');
+                hf = false; n++;
+                hits.append(new Json.Obj().put("type", "liquid").put("name", l.name)
+                    .put("localizedName", liquidNameOf(l)).toString());
+            }
+            hits.append(']');
+
+            respond(ex, 200, Json.ok(new Json.Obj()
+                .put("agent", agent.id).put("query", q)
+                .put("count", n).put("limit", limit)
+                .putRaw("results", hits.toString())
+                .toString()));
+            return;
+        }
+
+        // ---- 按分类列方块 ----
+        if (catName != null) {
+            StringBuilder arr = new StringBuilder("[");
+            boolean f = true;
+            int n = 0;
+            for (Block b : Vars.content.blocks()) {
+                if (b.isHidden() || n >= limit) continue;
+                if (b.category == null || !b.category.name().equalsIgnoreCase(catName)) continue;
+                if (!f) arr.append(',');
+                f = false; n++;
+                arr.append(new Json.Obj().put("name", b.name)
+                    .put("localizedName", blockNameOf(b))
+                    .put("size", b.size)
+                    .put("health", b.health)
+                    .put("requirements", requirementsJson(b))
+                    .toString());
+            }
+            arr.append(']');
+            respond(ex, 200, Json.ok(new Json.Obj()
+                .put("agent", agent.id).put("category", catName)
+                .put("count", n).putRaw("blocks", arr.toString()).toString()));
+            return;
+        }
+
+        // ---- 无参数：索引（分类清单 + 物品清单）----
+        java.util.LinkedHashMap<String, Integer> cats = new java.util.LinkedHashMap<>();
+        for (Block b : Vars.content.blocks()) {
+            if (b.isHidden()) continue;
+            String c = b.category == null ? "unknown" : b.category.name();
+            cats.merge(c, 1, Integer::sum);
+        }
+        StringBuilder catArr = new StringBuilder("{");
+        boolean cf2 = true;
+        for (var e : cats.entrySet()) {
+            if (!cf2) catArr.append(',');
+            cf2 = false;
+            catArr.append(Json.str(e.getKey())).append(':').append(e.getValue());
+        }
+        catArr.append('}');
+
+        StringBuilder items = new StringBuilder("[");
+        boolean if2 = true;
+        for (mindustry.type.Item i : Vars.content.items()) {
+            if (i.isHidden()) continue;
+            if (!if2) items.append(',');
+            if2 = false;
+            items.append(new Json.Obj().put("name", i.name)
+                .put("localizedName", itemNameOf(i))
+                .put("hardness", i.hardness).toString());
+        }
+        items.append(']');
+
+        respond(ex, 200, Json.ok(new Json.Obj()
+            .put("agent", agent.id)
+            .put("usage", "q=<关键词> 搜索 | item=<物品> 反查谁产谁吃 | cat=<分类> 列方块 | block=<方块> 详情")
+            .put("categories", cats.size())
+            .putRaw("categoryCounts", catArr.toString())
+            .putRaw("items", items.toString())
+            .toString()));
+    }
+
+    /** 名字 / 本地化名 / 介绍 任一命中即算匹配。 */
+    private static boolean matches(String needle, String raw, String localized, String desc) {
+        if (raw != null && raw.toLowerCase(java.util.Locale.ROOT).contains(needle)) return true;
+        if (localized != null && localized.toLowerCase(java.util.Locale.ROOT).contains(needle)) return true;
+        if (desc != null && desc.toLowerCase(java.util.Locale.ROOT).contains(needle)) return true;
+        return false;
+    }
+
+    /** 这个方块是否产出该物品。 */
+    private static boolean blockProducesItem(Block b, mindustry.type.Item it) {
+        if (b instanceof mindustry.world.blocks.production.GenericCrafter gc) {
+            if (gc.outputItem != null && gc.outputItem.item == it) return true;
+            if (gc.outputItems != null) {
+                for (var st : gc.outputItems) if (st.item == it) return true;
+            }
+        }
+        if (b instanceof mindustry.world.blocks.production.Drill dr) {
+            // 矿机能采它 —— 前提是硬度在 tier 之内
+            if (it.hardness <= dr.tier) return true;
+        }
+        if (b instanceof mindustry.world.blocks.production.SolidPump sp) {
+            // 抽水机那类：产的是液体，不算物品
+        }
+        return false;
+    }
+
+    /** 产出方式说明。 */
+    private static String productionKind(Block b, mindustry.type.Item it) {
+        if (b instanceof mindustry.world.blocks.production.Drill dr) {
+            return "drill(tier " + dr.tier + ")";
+        }
+        return "crafter";
+    }
+
+    /** 这个方块是否消耗该物品。 */
+    private static boolean blockConsumesItem(Block b, mindustry.type.Item it) {
+        if (b.consumers == null) return false;
+        for (var c : b.consumers) {
+            if (c instanceof mindustry.world.consumers.ConsumeItems ci) {
+                for (var st : ci.items) if (st.item == it) return true;
+            }
+            if (c instanceof mindustry.world.consumers.ConsumeItemFilter cif) {
+                try { if (cif.filter.get(it)) return true; } catch (Throwable ignored) {}
+            }
+        }
+        return false;
+    }
+
+    /** 消耗方式说明。 */
+    private static String consumptionKind(Block b, mindustry.type.Item it) {
+        if (b.consumers == null) return "unknown";
+        for (var c : b.consumers) {
+            if (c instanceof mindustry.world.consumers.ConsumeItems ci) {
+                for (var st : ci.items) {
+                    if (st.item == it) return "items x" + st.amount;
+                }
+            }
+            if (c instanceof mindustry.world.consumers.ConsumeItemFilter) return "filter(动态)";
+        }
+        return "unknown";
+    }
+
+    private static String requirementsJson(Block b) {
+        StringBuilder sb = new StringBuilder("{");
+        boolean f = true;
+        if (b.requirements != null) {
+            for (var st : b.requirements) {
+                if (!f) sb.append(',');
+                f = false;
+                sb.append(Json.str(st.item.name)).append(':').append(st.amount);
+            }
+        }
+        return sb.append('}').toString();
+    }
+
+    // 物品 / 单位 / 液体的文案，同样要走自建 bundle（无头服务端没有）
+    private static String itemNameOf(mindustry.type.Item i) {
+        ensureBundle();
+        if (modBundle instanceof arc.util.I18NBundle bd) {
+            String s = bd.get("item." + i.name + ".name", null);
+            if (s != null && !s.isEmpty()) return s;
+        }
+        return i.localizedName != null && !i.localizedName.isEmpty() ? i.localizedName : i.name;
+    }
+
+    private static String itemDescOf(mindustry.type.Item i) {
+        ensureBundle();
+        if (modBundle instanceof arc.util.I18NBundle bd) {
+            String s = bd.getOrNull("item." + i.name + ".description");
+            if (s != null) return s;
+        }
+        return i.description == null ? "" : i.description;
+    }
+
+    private static String unitNameOf(mindustry.type.UnitType u) {
+        ensureBundle();
+        if (modBundle instanceof arc.util.I18NBundle bd) {
+            String s = bd.get("unit." + u.name + ".name", null);
+            if (s != null && !s.isEmpty()) return s;
+        }
+        return u.localizedName != null && !u.localizedName.isEmpty() ? u.localizedName : u.name;
+    }
+
+    private static String unitDescOf(mindustry.type.UnitType u) {
+        ensureBundle();
+        if (modBundle instanceof arc.util.I18NBundle bd) {
+            String s = bd.getOrNull("unit." + u.name + ".description");
+            if (s != null) return s;
+        }
+        return u.description == null ? "" : u.description;
+    }
+
+    private static String liquidNameOf(mindustry.type.Liquid l) {
+        ensureBundle();
+        if (modBundle instanceof arc.util.I18NBundle bd) {
+            String s = bd.get("liquid." + l.name + ".name", null);
+            if (s != null && !s.isEmpty()) return s;
+        }
+        return l.localizedName != null && !l.localizedName.isEmpty() ? l.localizedName : l.name;
+    }
+
+    private static String liquidDescOf(mindustry.type.Liquid l) {
+        ensureBundle();
+        if (modBundle instanceof arc.util.I18NBundle bd) {
+            String s = bd.getOrNull("liquid." + l.name + ".description");
+            if (s != null) return s;
+        }
+        return l.description == null ? "" : l.description;
+    }
+
+    // ---- 方块文案：无头服务端没有 bundle，得自己建 ----    //
+    // ServerLauncher.java:44 写着 loadLocales = false —— 无头服务端主动关掉了
+    // 本地化加载。于是 UnlockableContent.load() 里的
+    //     localizedName = Core.bundle.get("block." + name + ".name", name)
+    // 拿到的是空串，description 也是 null。游戏内点开方块看到的那些文字，
+    // 在无头环境下必须自己从 bundles/ 里读。
+    private static Object modBundle = null;
+    private static boolean bundleTried = false;
+
+    private static void ensureBundle() {
+        if (bundleTried) return;
+        bundleTried = true;
+        // server-release.jar 里**没有** bundles/ 目录（只有客户端 jar 有），
+        // 所以 internal() 一定失败。改成先读工作目录下的 bundles/，
+        // 由部署脚本从客户端 jar 抽出来放好。
+        String[] candidates = {"bundles/bundle", "bundles/bundle_zh_CN", "bundles/bundle_en"};
+        for (String path : candidates) {
+            try {
+                var f = arc.Core.files.local(path);
+                if (f == null || !f.exists()) continue;
+                modBundle = arc.util.I18NBundle.createBundle(f, java.util.Locale.getDefault());
+                AIArena.log("loaded bundle for block descriptions: " + path);
+                return;
+            } catch (Throwable t) {
+                AIArena.log("bundle candidate " + path + " failed: " + t);
+            }
+        }
+        // 兜底：万一 classpath 里有
+        try {
+            modBundle = arc.util.I18NBundle.createBundle(
+                arc.Core.files.internal("bundles/bundle"), java.util.Locale.getDefault());
+            AIArena.log("loaded bundle from classpath");
+        } catch (Throwable t) {
+            AIArena.log("no bundle available; block descriptions will be empty");
+        }
+    }
+
+    private static String blockKey(Block b, String suffix) {
+        return "block." + b.name + "." + suffix;
+    }
+
+    private static String blockNameOf(Block b) {
+        // 先查 bundle。不能先看 b.localizedName —— 内容加载时它已被赋成
+        // fallback（也就是 name 本身），非空但没用。bundle 才是权威文案。
+        ensureBundle();
+        if (modBundle instanceof arc.util.I18NBundle bd) {
+            String s = bd.get(blockKey(b, "name"), null);
+            if (s != null && !s.isEmpty()) return s;
+        }
+        return b.localizedName != null && !b.localizedName.isEmpty() ? b.localizedName : b.name;
+    }
+
+    private static String blockDescOf(Block b) {
+        if (b.description != null && !b.description.isEmpty()) return b.description;
+        ensureBundle();
+        if (modBundle instanceof arc.util.I18NBundle bd) {
+            String s = bd.getOrNull(blockKey(b, "description"));
+            return s == null ? "" : s;
+        }
+        return "";
+    }
+
+    private static String blockDetailsOf(Block b) {
+        if (b.details != null && !b.details.isEmpty()) return b.details;
+        ensureBundle();
+        if (modBundle instanceof arc.util.I18NBundle bd) {
+            String s = bd.getOrNull(blockKey(b, "details"));
+            return s == null ? "" : s;
+        }
+        return "";
+    }
+    private static void handleBlock(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+        String name = p.get("name", null);
+
+        postToGame(ex, () -> {
+            if (name == null) {
+                StringBuilder arr = new StringBuilder("[");
+                boolean first = true;
+                for (Block b : Vars.content.blocks()) {
+                    if (b.isHidden() || !b.isPlaceable()) continue;
+                    if (!first) arr.append(',');
+                    first = false;
+                    arr.append(new Json.Obj()
+                        .put("name", b.name)
+                        .put("localizedName", blockNameOf(b))
+                        .put("size", b.size)
+                        .put("category", b.category == null ? "" : b.category.name())
+                        .toString());
+                }
+                arr.append(']');
+                return Json.ok(new Json.Obj().putRaw("blocks", arr.toString()).toString());
+            }
+
+            Block b = Vars.content.block(name);
+            if (b == null) return Json.error(1002, "no block named " + name);
+
+            // 材料
+            StringBuilder req = new StringBuilder("{");
+            boolean rf = true;
+            if (b.requirements != null) {
+                for (var stack : b.requirements) {
+                    if (!rf) req.append(',');
+                    rf = false;
+                    req.append(Json.str(stack.item.name)).append(':').append(stack.amount);
+                }
+            }
+            req.append('}');
+
+            // 输入
+            StringBuilder ins = new StringBuilder("[");
+            boolean inf = true;
+            for (var cons : b.consumers) {
+                Json.Obj o = null;
+                if (cons instanceof mindustry.world.consumers.ConsumeItems ci) {
+                    StringBuilder its = new StringBuilder("[");
+                    boolean f2 = true;
+                    for (var st : ci.items) {
+                        if (!f2) its.append(',');
+                        f2 = false;
+                        its.append(new Json.Obj().put("item", st.item.name).put("amount", st.amount).toString());
+                    }
+                    its.append(']');
+                    o = new Json.Obj().put("kind", "items").putRaw("items", its.toString());
+                } else if (cons instanceof mindustry.world.consumers.ConsumeItemDynamic) {
+                    o = new Json.Obj().put("kind", "dynamic-item")
+                         .put("note", "随方块配置变化，见 plans / 运行时 /factory");
+                } else if (cons instanceof mindustry.world.consumers.ConsumeItemFilter) {
+                    o = new Json.Obj().put("kind", "item-filter")
+                         .put("note", "按谓词过滤，静态查不出具体物品");
+                } else if (cons instanceof mindustry.world.consumers.ConsumeLiquid cl) {
+                    o = new Json.Obj().put("kind", "liquid")
+                         .put("liquid", cl.liquid.name).put("amount", cl.amount);
+                } else if (cons instanceof mindustry.world.consumers.ConsumeLiquids cls) {
+                    StringBuilder ls = new StringBuilder("[");
+                    boolean f2 = true;
+                    for (var st : cls.liquids) {
+                        if (!f2) ls.append(',');
+                        f2 = false;
+                        ls.append(new Json.Obj().put("liquid", st.liquid.name).put("amount", st.amount).toString());
+                    }
+                    ls.append(']');
+                    o = new Json.Obj().put("kind", "liquids").putRaw("liquids", ls.toString());
+                } else if (cons instanceof mindustry.world.consumers.ConsumePower cp) {
+                    o = new Json.Obj().put("kind", "power").put("amount", cp.usage);
+                } else if (cons instanceof mindustry.world.consumers.ConsumePayloads) {
+                    o = new Json.Obj().put("kind", "payload").put("note", "需要输入载荷");
+                }
+                if (o == null) continue;
+                if (!inf) ins.append(',');
+                inf = false;
+                ins.append(o.toString());
+            }
+            ins.append(']');
+
+            // 输出
+            StringBuilder outs = new StringBuilder("[");
+            boolean outf = true;
+            if (b instanceof mindustry.world.blocks.production.GenericCrafter gc) {
+                if (gc.outputItems != null) {
+                    for (var st : gc.outputItems) {
+                        if (!outf) outs.append(',');
+                        outf = false;
+                        outs.append(new Json.Obj().put("kind", "item")
+                            .put("item", st.item.name).put("amount", st.amount).toString());
+                    }
+                }
+                if (gc.outputLiquids != null) {
+                    for (var st : gc.outputLiquids) {
+                        if (!outf) outs.append(',');
+                        outf = false;
+                        outs.append(new Json.Obj().put("kind", "liquid")
+                            .put("liquid", st.liquid.name).put("amount", st.amount).toString());
+                    }
+                }
+            }
+            if (b instanceof mindustry.world.blocks.units.UnitFactory uf) {
+                for (var plan : uf.plans) {
+                    if (!outf) outs.append(',');
+                    outf = false;
+                    StringBuilder pr = new StringBuilder("{");
+                    boolean f2 = true;
+                    for (var st : plan.requirements) {
+                        if (!f2) pr.append(',');
+                        f2 = false;
+                        pr.append(Json.str(st.item.name)).append(':').append(st.amount);
+                    }
+                    pr.append('}');
+                    outs.append(new Json.Obj().put("kind", "unit")
+                        .put("unit", plan.unit.name)
+                        .put("timeSeconds", plan.time / 60f)
+                        .putRaw("requirements", pr.toString())
+                        .toString());
+                }
+            }
+            if (b instanceof mindustry.world.blocks.production.Drill dr) {
+                if (!outf) outs.append(',');
+                outf = false;
+                outs.append(new Json.Obj().put("kind", "ore")
+                    .put("tier", dr.tier)
+                    .put("note", "产出取决于脚下矿脉，用 /ore 查具体坐标").toString());
+            }
+            float pp = (b instanceof mindustry.world.blocks.power.PowerGenerator pg) ? pg.powerProduction : 0f;
+            if (pp > 0) {
+                if (!outf) outs.append(',');
+                outf = false;
+                outs.append(new Json.Obj().put("kind", "power")
+                    .put("amount", pp).toString());
+            }
+            outs.append(']');
+
+            return Json.ok(new Json.Obj()
+                .put("name", b.name)
+                .put("localizedName", blockNameOf(b))
+                .put("description", blockDescOf(b))
+                .put("details", blockDetailsOf(b))
+                .put("category", b.category == null ? "" : b.category.name())
+                .put("size", b.size)
+                .put("health", b.health)
+                .put("hasPower", b.hasPower)
+                .put("hasItems", b.hasItems)
+                .put("hasLiquids", b.hasLiquids)
+                .put("itemCapacity", b.itemCapacity)
+                .put("powerProduction", (b instanceof mindustry.world.blocks.power.PowerGenerator pg2) ? pg2.powerProduction : 0f)
+                .putRaw("requirements", req.toString())
+                .putRaw("inputs", ins.toString())
+                .putRaw("outputs", outs.toString())
+                .toString());
+        });
+    }
+
+    /**
+     * 这一格放矿机会产出什么。GET /v1/{agent}/ore?x=&y=&block=<drillName>
+     *
+     * 这是 Drill.countOre() 的静态版本：按方块尺寸算出 footprint，
+     * 数出各矿种的格子数，取最多的那个当 dominantItem，
+     * 再拿 block.tier 和矿的 hardness 比 —— 和引擎运行时判定同一套规则。
+     *
+     * 不带 block 时默认用 mechanical-drill。
+     */
+    private static void handleOre(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+        int x = p.getInt("x", Integer.MIN_VALUE);
+        int y = p.getInt("y", Integer.MIN_VALUE);
+        if (x == Integer.MIN_VALUE || y == Integer.MIN_VALUE) {
+            respond(ex, 400, Json.error(1001, "required: x, y (tile coords)"));
+            return;
+        }
+        String blockName = p.get("block", "mechanical-drill");
+
+        postToGame(ex, () -> {
+            Block blk = Vars.content.block(blockName);
+            if (blk == null) return Json.error(1002, "no block named " + blockName);
+            if (!(blk instanceof mindustry.world.blocks.production.Drill dr)) {
+                return Json.error(1001, blockName + " is not a drill");
+            }
+
+            Tile t = Vars.world.tile(x, y);
+            if (t == null) return Json.error(1003, "tile out of bounds: (" + x + "," + y + ")");
+
+            int size = blk.size;
+            int off = -((size - 1) / 2);
+            java.util.Map<String, Integer> counts = new java.util.LinkedHashMap<>();
+            StringBuilder tiles = new StringBuilder("[");
+            boolean first = true;
+            int free = 0;
+
+            for (int dx = 0; dx < size; dx++) {
+                for (int dy = 0; dy < size; dy++) {
+                    Tile tl = Vars.world.tile(x + off + dx, y + off + dy);
+                    if (tl == null) continue;
+                    if (tl.block() == mindustry.content.Blocks.air) free++;
+                    var drop = tl.drop();
+                    if (drop == null) continue;
+                    counts.merge(drop.name, 1, Integer::sum);
+                    if (!first) tiles.append(',');
+                    first = false;
+                    tiles.append(new Json.Obj()
+                        .put("x", tl.x).put("y", tl.y)
+                        .put("item", drop.name)
+                        .put("hardness", drop.hardness)
+                        .put("mineable", dr.tier >= drop.hardness)
+                        .toString());
+                }
+            }
+            tiles.append(']');
+
+            String dominant = "";
+            int best = 0;
+            for (var e : counts.entrySet()) {
+                if (e.getValue() > best) { best = e.getValue(); dominant = e.getKey(); }
+            }
+            var domItem = dominant.isEmpty() ? null : Vars.content.item(dominant);
+
+            Team reqTeam = agent.team() == null ? Team.sharded : agent.team();
+            boolean canPlace = mindustry.world.Build.validPlace(blk, reqTeam, x, y, 0);
+
+            return Json.ok(new Json.Obj()
+                .put("x", x).put("y", y)
+                .put("block", blk.name)
+                .put("tier", dr.tier)
+                .put("dominantItem", dominant)
+                .put("dominantItems", best)
+                .put("oreHardness", domItem == null ? -1 : domItem.hardness)
+                .put("canMine", domItem != null && dr.tier >= domItem.hardness)
+                .put("freeTiles", free)
+                .put("footprintTiles", size * size)
+                .put("validPlace", canPlace)
+                .putRaw("oreTiles", tiles.toString())
+                .toString());
+        });
+    }
+    private static void handleDrill(HttpExchange ex, AIArena.Agent agent) {
+        Team team = agent.team();
+        if (team == null) { respond(ex, 403, Json.error(1403, "agent has no team")); return; }
+
+        postToGame(ex, () -> {
+            StringBuilder arr = new StringBuilder("[");
+            boolean first = true;
+
+            for (mindustry.gen.Building b : team.data().buildings) {
+                if (!(b instanceof mindustry.world.blocks.production.Drill.DrillBuild)) continue;
+                if (Vars.state.rules.fog && !Vars.fogControl.isVisibleTile(team, b.tileX(), b.tileY())) continue;
+
+                var d = (mindustry.world.blocks.production.Drill.DrillBuild) b;
+                var blk = (mindustry.world.blocks.production.Drill) b.block;
+
+                if (!first) arr.append(',');
+                first = false;
+
+                StringBuilder inv = new StringBuilder("{");
+                boolean vf = true;
+                for (mindustry.type.Item it : Vars.content.items()) {
+                    int amt = b.items.get(it);
+                    if (amt <= 0) continue;
+                    if (!vf) inv.append(',');
+                    vf = false;
+                    inv.append(Json.str(it.name)).append(':').append(amt);
+                }
+                inv.append('}');
+
+                // 脚下覆盖的格子，标出哪些有矿
+                StringBuilder ore = new StringBuilder("[");
+                boolean of = true;
+                int size = blk.size;
+                int off = -((size - 1) / 2);
+                for (int dx = 0; dx < size; dx++) {
+                    for (int dy = 0; dy < size; dy++) {
+                        Tile tl = Vars.world.tile(b.tileX() + off + dx, b.tileY() + off + dy);
+                        if (tl == null) continue;
+                        String drop = tl.drop() == null ? "" : tl.drop().name;
+                        if (drop.isEmpty()) continue;
+                        if (!of) ore.append(',');
+                        of = false;
+                        ore.append(new Json.Obj()
+                            .put("x", tl.x).put("y", tl.y)
+                            .put("item", drop)
+                            .put("hardness", tl.drop().hardness)
+                            .toString());
+                    }
+                }
+                ore.append(']');
+
+                int oreH = d.dominantItem == null ? -1 : d.dominantItem.hardness;
+
+                arr.append(new Json.Obj()
+                    .put("x", b.tileX()).put("y", b.tileY())
+                    .put("block", b.block.name)
+                    .put("tier", blk.tier)
+                    .put("dominantItem", d.dominantItem == null ? "" : d.dominantItem.name)
+                    .put("dominantItems", d.dominantItems)
+                    .put("oreHardness", oreH)
+                    .put("canMine", d.dominantItem != null && blk.tier >= oreH)
+                    .put("progress", d.progress())
+                    .put("warmup", d.warmup)
+                    .put("lastDrillSpeed", d.lastDrillSpeed)
+                    .put("efficiency", b.efficiency)
+                    .put("enabled", b.enabled)
+                    .put("full", b.items.total() >= b.block.itemCapacity)
+                    .put("itemCapacity", b.block.itemCapacity)
+                    .putRaw("items", inv.toString())
+                    .putRaw("oreTiles", ore.toString())
+                    .toString());
+            }
+            arr.append(']');
+
+            return Json.ok(new Json.Obj()
+                .put("agent", agent.id).put("team", team.name)
+                .put("tick", (int) Vars.state.tick)
+                .putRaw("drills", arr.toString())
+                .toString());
+        });
+    }
+    private static void handleMine(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+        int unitId = p.getInt("unit", -1);
+        Team team = agent.team();
+        if (team == null) { respond(ex, 403, Json.error(1403, "agent has no team")); return; }
+        if (unitId < 0) { respond(ex, 400, Json.error(1001, "required: unit=<id>")); return; }
+
+        postToGame(ex, () -> {
+            var u = mindustry.gen.Groups.unit.getByID(unitId);
+            if (u == null) return Json.error(1002, "no unit with id " + unitId);
+            if (u.team != team) {
+                return Json.error(1005, "unit " + unitId + " belongs to " + u.team.name);
+            }
+
+            if (p.getBool("clear", false)) {
+                u.mineTile = null;
+                return Json.ok(new Json.Obj()
+                    .put("message", "unit " + unitId + " stopped mining").toString());
+            }
+
+            int x = p.getInt("x", Integer.MIN_VALUE);
+            int y = p.getInt("y", Integer.MIN_VALUE);
+            if (x == Integer.MIN_VALUE || y == Integer.MIN_VALUE) {
+                return Json.error(1001, "required: x, y (tile coords) or clear=true");
+            }
+
+            Tile t = Vars.world.tile(x, y);
+            if (t == null) return Json.error(1003, "tile out of bounds: (" + x + "," + y + ")");
+
+            // 原版判定：单位能不能挖这种矿（mineTier vs 硬度）、够不够得着（mineRange）
+            if (!u.canMine()) {
+                return Json.error(1005, "unit type " + u.type.name + " cannot mine (mineSpeed/mineTier)");
+            }
+            if (!u.validMine(t)) {
+                mindustry.type.Item drop = t.drop();
+                return Json.error(1005,
+                    "unit " + unitId + " cannot mine (" + x + "," + y + "): "
+                  + "drop=" + (drop == null ? "none" : drop.name)
+                  + " hardness=" + (drop == null ? "-" : drop.hardness)
+                  + " mineTier=" + u.type.mineTier
+                  + " dist=" + (int) (u.dst(t.worldx(), t.worldy()) / Vars.tilesize) + "t"
+                  + " mineRange=" + (int) (u.type.mineRange / Vars.tilesize) + "t");
+            }
+
+            u.mineTile = t;
+            return Json.ok(new Json.Obj()
+                .put("message", "unit " + unitId + " mining (" + x + "," + y + ")")
+                .put("drop", t.drop() == null ? "" : t.drop().name)
+                .toString());
+        });
+    }
+    /**
+     * 单位工厂的生产状态。GET /v1/{agent}/factory
+     *
+     * 为什么要单独一个端点：单位现在必须由工厂生产，而「工厂在造什么、造到几成、
+     * 缺不缺电」是 AI 做决策的必要输入。塞进 /buildings 会让每帧快照变重，
+     * 而且工厂数量很少，单独查更省。
+     *
+     * 返回己方所有 unit factory / fabricator / assembler 的：
+     *   plan       当前选中的产线（单位名），未选则为空
+     *   progress   0..1
+     *   efficiency 电力充足度，0 表示没电（生产会停）
+     *   requirements 这条产线需要的物品
+     *   items      工厂当前库存
+     */
+    private static void handleFactory(HttpExchange ex, AIArena.Agent agent) {
+        Team team = agent.team();
+        if (team == null) { respond(ex, 403, Json.error(1403, "agent has no team")); return; }
+
+        postToGame(ex, () -> {
+            StringBuilder arr = new StringBuilder("[");
+            boolean first = true;
+
+            for (mindustry.gen.Building b : team.data().buildings) {
+                if (b == null) continue;
+                boolean isFactory = b instanceof mindustry.world.blocks.units.UnitFactory.UnitFactoryBuild;
+                boolean isAssembler = b instanceof mindustry.world.blocks.units.UnitAssembler.UnitAssemblerBuild;
+                if (!isFactory && !isAssembler) continue;
+
+                // 视野：己方建筑总是可见，这里只做一致性检查
+                if (Vars.state.rules.fog && !Vars.fogControl.isVisibleTile(team, b.tileX(), b.tileY())) continue;
+
+                if (!first) arr.append(',');
+                first = false;
+
+                Json.Obj o = new Json.Obj()
+                    .put("x", b.tileX()).put("y", b.tileY())
+                    .put("block", b.block.name)
+                    .put("efficiency", b.efficiency)
+                    .put("enabled", b.enabled)
+                    .put("powered", b.power != null && b.power.status > 0f);
+
+                if (isFactory) {
+                    var uf = (mindustry.world.blocks.units.UnitFactory.UnitFactoryBuild) b;
+                    var ut = uf.unit();
+                    o.put("plan", ut == null ? "" : ut.name);
+                    o.put("progress", uf.fraction());
+                    o.put("planIndex", uf.currentPlan);
+                    // 诊断：成品单位是以 payload 形式待在工厂里的，靠 moveOutPayload() 弹出。
+                    // 弹不出去就 payload != null -> shouldConsume() 永久 false -> efficiency 0
+                    // -> 工厂彻底卡死（实测就是产线爬到 100% 之后再也不动）。
+                    o.put("payload", uf.payload == null ? "" : uf.payload.getClass().getSimpleName());
+                    String puName = "";
+                    if (uf.payload instanceof mindustry.world.blocks.payloads.UnitPayload) {
+                        puName = ((mindustry.world.blocks.payloads.UnitPayload) uf.payload).unit.type.name;
+                    }
+                    o.put("payloadUnit", puName);
+                    o.put("payloadVec", (int) uf.payVector.len());
+                    o.put("rotation", uf.rotation);
+                    o.put("shouldConsume", uf.shouldConsume());
+                    o.put("activation", b.team.activateUnitFactories());
+                    String frontName = "";
+                    boolean frontSolid = false;
+                    try {
+                        mindustry.gen.Building fr = uf.front();
+                        if (fr != null) {
+                            frontName = fr.block.name;
+                            frontSolid = fr.tile != null && fr.tile.solid();
+                        }
+                    } catch (Throwable ignored) {}
+                    o.put("front", frontName);
+                    o.put("frontSolid", frontSolid);
+
+                    StringBuilder req = new StringBuilder("{");
+                    boolean rf = true;
+                    if (ut != null && uf.currentPlan >= 0 && uf.currentPlan < ((mindustry.world.blocks.units.UnitFactory) uf.block).plans.size) {
+                        for (var stack : ((mindustry.world.blocks.units.UnitFactory) uf.block).plans.get(uf.currentPlan).requirements) {
+                            if (!rf) req.append(',');
+                            rf = false;
+                            req.append(Json.str(stack.item.name)).append(':').append(stack.amount);
+                        }
+                    }
+                    req.append('}');
+                    o.putRaw("requirements", req.toString());
+
+                    StringBuilder inv = new StringBuilder("{");
+                    boolean vf = true;
+                    for (mindustry.type.Item it : Vars.content.items()) {
+                        int amt = b.items.get(it);
+                        if (amt <= 0) continue;
+                        if (!vf) inv.append(',');
+                        vf = false;
+                        inv.append(Json.str(it.name)).append(':').append(amt);
+                    }
+                    inv.append('}');
+                    o.putRaw("items", inv.toString());
+                }
+
+                arr.append(o.toString());
+            }
+            arr.append(']');
+
+            return Json.ok(new Json.Obj()
+                .put("agent", agent.id).put("team", team.name)
+                .put("tick", (int) Vars.state.tick)
+                .putRaw("factories", arr.toString())
+                .toString());
+        });
+    }
     private static void handleConfig(HttpExchange ex, AIArena.Agent agent) {
         Params p = Params.of(ex);
         int x = p.getInt("x", Integer.MIN_VALUE);
@@ -630,6 +1749,577 @@ public final class HttpApi {
     }
 
     /**
+     * 迷雾开关。仅 admin。
+     *
+     * 观战时有两套迷雾机制，各有各的问题：
+     *
+     *   静态迷雾（staticFog = true）
+     *     服务器把「每队已探索的格位图」同步给客户端（FogControl.shouldWrite）。
+     *     切队时位图跟着换，迷雾会正确更新。但观察者必须属于某个有视野的队，
+     *     derelict 队的位图是空的，照样全黑。
+     *
+     *   动态迷雾（staticFog = false）
+     *     客户端按「自己单位/建筑的视野半径」实时算。同样要求观察者有单位。
+     *
+     * 也就是说，**客户端侧的迷雾永远取决于观察者自己队伍的视野源**。
+     * 想让观察者看到全图，要么给它一个单位，要么把 fog 整个关掉。
+     *
+     * 关掉 fog 会同时让 AI 看到全图（服务端 safeVisible 也读这个开关），
+     * 也就是破坏对等约束 —— 所以这是裁判工具，不是常规观战手段。
+     *
+     * GET  /v1/{admin}/fog                  查看当前设置
+     * POST /v1/{admin}/fog?fog=false        关掉迷雾
+     * POST /v1/{admin}/fog?fog=true&static=true   打开（含静态位图同步）
+     */
+    private static void handleFog(HttpExchange ex, AIArena.Agent agent) {
+        if (!agent.admin) {
+            respond(ex, 403, Json.error(1403, "fog control requires an admin token"));
+            return;
+        }
+        Params p = Params.of(ex);
+        String fogParam = p.get("fog", null);
+
+        postToGame(ex, () -> {
+            var r = Vars.state.rules;
+
+            if (fogParam == null) {
+                return Json.ok(new Json.Obj()
+                    .put("fog", r.fog)
+                    .put("staticFog", r.staticFog)
+                    .put("pvp", r.pvp)
+                    .put("note", "client-side fog depends on the viewer team's own vision sources")
+                    .toString());
+            }
+
+            boolean on = Boolean.parseBoolean(fogParam);
+            boolean stat = p.get("static", null) == null || Boolean.parseBoolean(p.get("static", "true"));
+
+            r.fog = on;
+            r.staticFog = on && stat;
+
+            // 位图需要重置，否则客户端拿到的是上一局的旧数据
+            try { Vars.fogControl.resetFog(); } catch (Throwable ignored) {}
+
+            // 让客户端重新加载世界状态（rules 变了），并重置迷雾位图
+            try {
+                for (var pl : mindustry.gen.Groups.player) {
+                    // 玩家可能正在断开，con 会是 null —— sendWorldData 内部
+                    // 直接读 player.con.hasConnected，不判空就抛 NPE
+                    if (pl == null || pl.con == null) continue;
+                    pl.sendMessage("[accent]裁判调整了迷雾: fog=" + r.fog + " staticFog=" + r.staticFog);
+                    Vars.netServer.sendWorldData(pl);
+                }
+            } catch (Throwable ignored) {}
+
+            return Json.ok(new Json.Obj()
+                .put("message", "fog=" + r.fog + " staticFog=" + r.staticFog)
+                .put("fog", r.fog)
+                .put("staticFog", r.staticFog).toString());
+        });
+    }
+
+    /**
+     * 强制把对局切到 playing。仅 admin。
+     *
+     * Mindustry 在 host 之后会进入「等待玩家」状态，需要足够玩家才自动开始
+     * （PvP 图要求每个核心队都有人）。这个端点跳过那个等待，直接开打，
+     * 让 HTTP 驱动的 AI 可以在没有真人玩家的情况下对局。
+     */
+    private static void handleStart(HttpExchange ex, AIArena.Agent agent) {
+        if (!agent.admin) {
+            respond(ex, 403, Json.error(1403, "start requires an admin token"));
+            return;
+        }
+        postToGame(ex, () -> {
+            // 关掉所有会自动暂停的机制。
+            //
+            // 引擎有两处独立的「没玩家就暂停」：
+            //   ServerControl:321  Config.autoPause —— Groups.player.isEmpty() 就暂停
+            //   NetServer:1056     rules.pvpAutoPause —— PvP 图等待玩家就暂停
+            //
+            // 第二条是我们的 setup 自己触发的（它设了 pvp = true），
+            // 所以 /start 把状态设成 playing 之后会立刻被它改回 paused。
+            // 这个竞技场里没有真人玩家，AI 全走 HTTP，必须关掉。
+            var r = Vars.state.rules;
+            r.pvpAutoPause = false;
+            r.pauseDisabled = true;
+
+            // 还有 server.properties 里的 autoPause
+            try {
+                mindustry.net.Administration.Config.autoPause.set(false);
+            } catch (Throwable ignored) {}
+
+            if (Vars.state.getState() != mindustry.core.GameState.State.playing) {
+                Vars.state.set(mindustry.core.GameState.State.playing);
+            }
+
+            // 切到 playing 同样会清掉实体。实测 start 之后单位从 3 变 0 ——
+            // 玩家在 host 那一步已经没了，孤立的单位随后被清掉，于是整局没有
+            // 任何单位，AI 无兵可用。这里再重建一次，保证开打时每个 agent
+            // 都有玩家（玩家在 → PlayerComp 自动从核心生成单位）。
+            StringBuilder log = new StringBuilder();
+            int n = ensureAgentPlayers(log);
+
+            return Json.ok(new Json.Obj()
+                .put("message", "state=" + Vars.state.getState().name()
+                                + " pvpAutoPause=false pauseDisabled=true autoPause=false"
+                                + "; re-created " + n + " AI player(s)")
+                .put("state", Vars.state.getState().name())
+                .put("tick", (int) Vars.state.tick)
+                .put("players", mindustry.gen.Groups.player.size())
+                .put("units", mindustry.gen.Groups.unit.size())
+                .put("agents", n)
+                .put("pvpAutoPause", r.pvpAutoPause)
+                .put("pauseDisabled", r.pauseDisabled).toString());
+        });
+    }
+
+    /**
+     * 打开游戏端口，让 Mindustry 客户端能连进来观战。仅 admin。
+     *
+     * headless 服务器默认**不会**自动监听游戏端口 —— NetServer.openServer()
+     * 正常由控制台 `host` 命令触发，而这个服务器是用 -jar 起的、stdin 被重定向，
+     * 所以从来没开过。结果是客户端根本连不进来。
+     *
+     * GET /v1/{admin}/host          查看状态
+     * POST /v1/{admin}/host         打开端口
+     */
+    private static void handleHost(HttpExchange ex, AIArena.Agent agent) {
+        if (!agent.admin) {
+            respond(ex, 403, Json.error(1403, "host control requires an admin token"));
+            return;
+        }
+        Params p = Params.of(ex);
+        String action = p.get("action", "open");
+
+        postToGame(ex, () -> {
+            if (Vars.netServer == null) {
+                return Json.error(1500, "netServer is not available");
+            }
+
+            int port;
+            try {
+                port = mindustry.net.Administration.Config.port.num();
+            } catch (Throwable t) {
+                port = 6567;
+            }
+
+            if (action.equals("status")) {
+                boolean open = Vars.net != null && Vars.net.server();
+                return Json.ok(new Json.Obj()
+                    .put("open", open)
+                    .put("port", port)
+                    .put("players", mindustry.gen.Groups.player.size())
+                    .put("state", Vars.state.getState().name()).toString());
+            }
+
+            if (Vars.net != null && Vars.net.server()) {
+                return Json.ok(new Json.Obj()
+                    .put("message", "already hosting on port " + port)
+                    .put("port", port).toString());
+            }
+
+            try {
+                Vars.netServer.openServer();
+
+                // openServer() 会清空 Groups.player —— setup 里建的 AI 玩家全没了。
+                // 实测（每秒采样）：
+                //     setup 之后  玩家=3 单位=3
+                //     host  之后  玩家=0 单位=3   ← 玩家被清掉
+                //     start 之后  玩家=0 单位=0   ← 孤立单位随后也没了
+                // 没有玩家就没有 PlayerComp 去 requestSpawn，AI 会一动不动。
+                // 所以每次开端口之后都要把 AI 玩家重建一遍。
+                StringBuilder log = new StringBuilder();
+                int n = ensureAgentPlayers(log);
+
+                return Json.ok(new Json.Obj()
+                    .put("message", "opened server on port " + port
+                                    + "; re-created " + n + " AI player(s) after openServer() cleared Groups.player")
+                    .put("port", port)
+                    .put("agents", n).toString());
+            } catch (Throwable t) {
+                return Json.error(1500, "host failed: " + t);
+            }
+        });
+    }
+
+    /**
+     * 清掉本 mod 创建过的所有 AI 玩家。
+     *
+     * 每次 setup / host / start 都会重建，先清一遍可以避免同一个 agent 累积出
+     * 好几个同名 Player（每个都还在 Groups.player 里跑 update）。
+     */
+    private static void clearAgentPlayers() {
+        java.util.List<mindustry.gen.Player> stale = new java.util.ArrayList<>();
+        for (mindustry.gen.Player p : mindustry.gen.Groups.player) {
+            if (p != null && p.name != null && p.name.startsWith("[AI] ")) stale.add(p);
+        }
+        for (mindustry.gen.Player p : stale) {
+            try { p.remove(); } catch (Throwable ignored) {}
+        }
+        for (AIArena.Agent a : AIArena.agents) a.bindPlayer(null);
+    }
+
+    /**
+     * 为所有已绑定队伍、但当前**没有玩家对象**的 agent 补建玩家（非破坏性）。
+     *
+     * 只补缺，不动已经存在的玩家 —— 破坏性重建会连带清掉玩家手上的单位。
+     *
+     * 引擎的 PlayerComp.update() 会自动给「有核心但没单位的玩家」生成初始单位，
+     * 所以只要玩家在、队伍有核心，单位就会自己出现，不需要手动 spawn。
+     *
+     * @return 新建的玩家数
+     */
+    static int ensureAgentPlayers(StringBuilder log) {
+        int created = 0;
+
+        // 先清掉同名重复的 AI 玩家。
+        //
+        // 早期版本只认 agent 里存的那个 player() 引用，引用一旦被覆盖
+        // （clearAgentPlayers 置 null、或某次重建），旧玩家就变成在场上继续跑、
+        // 继续从核心领单位的孤儿 —— 看门狗看不见它，于是又建一个。
+        // 实测结果就是每个队两个 [AI] alpha，各自带一个 gamma，
+        // 看起来像「开局白送单位」。
+        dedupeAgentPlayers();
+
+        for (AIArena.Agent a : AIArena.agents) {
+            if (a.admin) continue;
+            Team t = a.team();
+            if (t == null) continue;
+
+            String name = "[AI] " + a.id;
+
+            // 判定依据是**场上的名字**，不是我们记着的引用
+            mindustry.gen.Player found = null;
+            for (mindustry.gen.Player p : mindustry.gen.Groups.player) {
+                if (p != null && name.equals(p.name) && p.isAdded()) { found = p; break; }
+            }
+            if (found != null) {
+                if (a.player() != found) a.bindPlayer(found);   // 顺手修正引用
+                continue;
+            }
+
+            if (spawnAgentPlayer(a, t, log) != null) created++;
+        }
+        return created;
+    }
+
+    /**
+     * 同名 AI 玩家只保留一个，多余的移除（含它们手上的单位）。
+     *
+     * ⚠ 保留**队伍正确的那一个**，不能只留先遇到的。
+     *
+     * 实测：看门狗每 500ms 跑一次，它在 setup 之前就会先用配置队（100/101）
+     * 建出 [AI] alpha。setup 之后 alpha 被绑到 sharded 并新建了正确的玩家，
+     * 此时场上同时存在两个 [AI] alpha —— 一个在 team#100、一个在 sharded。
+     * 如果按遍历顺序留第一个，就会把正确那个删掉，等于绑定白做，
+     * 结果是「AI 挂在没有核心的队上，既没单位也没视野」。
+     */
+    private static void dedupeAgentPlayers() {
+        java.util.Map<String, mindustry.gen.Player> keep = new java.util.HashMap<>();
+        java.util.List<mindustry.gen.Player> dupes = new java.util.ArrayList<>();
+
+        for (mindustry.gen.Player p : mindustry.gen.Groups.player) {
+            if (p == null || p.name == null || !p.name.startsWith("[AI] ")) continue;
+
+            mindustry.gen.Player prev = keep.get(p.name);
+            if (prev == null) { keep.put(p.name, p); continue; }
+
+            // 已经有同名了：谁更该留下？
+            // 名字形如 "[AI] <agentId>"，用它反查 agent 当前的绑定队伍。
+            String agentId = p.name.substring("[AI] ".length());
+            AIArena.Agent a = null;
+            for (AIArena.Agent cand : AIArena.agents) {
+                if (cand.id.equals(agentId)) { a = cand; break; }
+            }
+            boolean pOk = a != null && a.team() != null && p.team() == a.team();
+            boolean prevOk = a != null && a.team() != null && prev.team() == a.team();
+
+            if (pOk && !prevOk) {
+                dupes.add(prev);
+                keep.put(p.name, p);
+            } else {
+                dupes.add(p);
+            }
+        }
+
+        for (mindustry.gen.Player p : dupes) {
+            try {
+                if (p.unit() != null) p.clearUnit();
+                p.remove();
+            } catch (Throwable ignored) {}
+        }
+
+        if (!dupes.isEmpty()) {
+            AIArena.log("deduped " + dupes.size() + " duplicate AI player(s)");
+        }
+    }
+
+    /**
+     * 为所有已绑定队伍的 agent 强制重建玩家（破坏性）。
+     * 只在 setup 这种「重新开局」的场合用。
+     */
+    private static int rebindAgentPlayers(StringBuilder log) {
+        clearAgentPlayers();
+        return ensureAgentPlayers(log);
+    }
+
+    /**
+     * 管理已连接的客户端玩家。仅 admin。
+     *
+     * 观战需要一个「不会干扰对局」的身份：
+     *   - 加入 derelict 队（无核心，不会被 PlayerComp 自动重生）
+     *   - 给 admin 权限，这样能看到全图、可以随时切队
+     *
+     * GET  /v1/{admin}/admin                          列出在线玩家
+     * POST /v1/{admin}/admin?action=observe&player=<id>  把玩家设为观察者
+     * POST /v1/{admin}/admin?action=admin&player=<id>    给玩家 admin
+     */
+    /**
+     * 运行时诊断快照。仅 admin。
+     *
+     * 一次拉齐排查「看不到单位 / 切队跳回 / 建筑延迟出现」所需要的全部事实：
+     *   - 每个观战者的**视角队伍**（服务端认定的），以及它和实际队伍的差异
+     *   - 每个队伍的实体数，用来和客户端 Groups.unit/build 对照
+     *   - 连接事件时间线 + 断开原因直方图（closed / timeout / error）
+     *   - 快照路由计数，验证视角真的被路由了
+     *
+     * GET /v1/{admin}/diag
+     */
+    /**
+     * 服务端每队的迷雾数据状态。
+     *
+     * 观战切到某些队伍整屏全黑，而 UI 层正常。客户端那边测出来
+     * getDiscovered(team) 返回的是**长度 0 的 Bits**（不是 null）——
+     * FogRenderer 对 null 是「不画迷雾」（世界可见），对全零位图是
+     * 「全部未探索」（全黑）。所以要看清服务端这份数据是什么样。
+     */
+    private static String fogStateJson() {
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        try {
+            for (Team t : Team.all) {
+                if (t == null) continue;
+                var bits = Vars.fogControl.getDiscovered(t);
+                if (bits == null) continue;
+                int len = bits.length();
+                int set = 0;
+                for (int i = 0; i < len; i++) if (bits.get(i)) set++;
+                if (!first) sb.append(',');
+                first = false;
+                sb.append(new Json.Obj()
+                    .put("team", t.id).put("name", t.name)
+                    .put("bits", len).put("discovered", set).toString());
+            }
+        } catch (Throwable e) {
+            sb.append(new Json.Obj().put("error", String.valueOf(e)).toString());
+        }
+        return sb.append(']').toString();
+    }
+
+    private static void handleDiag(HttpExchange ex, AIArena.Agent agent) {
+        if (!agent.admin) {
+            respond(ex, 403, Json.error(1403, "diag requires an admin token"));
+            return;
+        }
+        postToGame(ex, () -> {
+            var r = Vars.state.rules;
+
+            StringBuilder players = new StringBuilder("[");
+            boolean pf = true;
+            for (var pl : mindustry.gen.Groups.player) {
+                if (!pf) players.append(',');
+                pf = false;
+                players.append(new Json.Obj()
+                    .put("name", pl.name)
+                    .put("id", pl.id)
+                    .put("team", pl.team().id)
+                    .put("teamName", pl.team().name)
+                    .put("view", AIArena.viewTeamOf(pl))
+                    .put("spectator", pl.spectator)
+                    .put("observer", AIArena.observers.contains(pl.uuid()))
+                    .put("hasUnit", pl.unit() != null)
+                    .put("unitType", pl.unit() == null ? "" : pl.unit().type.name)
+                    .put("connected", pl.con != null && pl.con.hasConnected)
+                    .toString());
+            }
+            players.append(']');
+
+            StringBuilder teams = new StringBuilder("[");
+            boolean tf = true;
+            for (var td : Vars.state.teams.present) {
+                if (!tf) teams.append(',');
+                tf = false;
+                teams.append(new Json.Obj()
+                    .put("id", td.team.id)
+                    .put("name", td.team.name)
+                    .put("units", td.units.size)
+                    .put("builds", td.buildings.size)
+                    .put("cores", td.cores.size)
+                    .put("players", td.players.size)
+                    .toString());
+            }
+            teams.append(']');
+
+            return Json.ok(new Json.Obj()
+                .put("tick", (int) Vars.state.tick)
+                .put("state", Vars.state.getState().name())
+                .put("paused", Vars.state.isPaused())
+                .put("fog", r.fog)
+                .put("staticFog", r.staticFog)
+                .put("pvp", r.pvp)
+                .put("worldUnits", mindustry.gen.Groups.unit.size())
+                .put("worldBuilds", mindustry.gen.Groups.build.size())
+                .put("worldPlayers", mindustry.gen.Groups.player.size())
+                .put("teamBatchSends", Diag.teamBatchSends())
+                .put("fullViewSends", Diag.fullViewSends())
+                .put("spectatorRouted", Diag.spectatorRouted())
+                .putRaw("fogState", fogStateJson())
+                .putRaw("players", players.toString())
+                .putRaw("teams", teams.toString())
+                .putRaw("disconnectReasons", Diag.reasonHistogramJson())
+                .putRaw("connectionEvents", Diag.eventsJson())
+                .toString());
+        });
+    }
+    private static void handleAdmin(HttpExchange ex, AIArena.Agent agent) {
+        if (!agent.admin) {
+            respond(ex, 403, Json.error(1403, "player administration requires an admin token"));
+            return;
+        }
+        Params p = Params.of(ex);
+        String action = p.get("action", null);
+
+        postToGame(ex, () -> {
+            if (action == null) {
+                StringBuilder arr = new StringBuilder("[");
+                boolean first = true;
+                for (var pl : mindustry.gen.Groups.player) {
+                    if (!first) arr.append(',');
+                    first = false;
+                    arr.append(new Json.Obj()
+                        .put("id", pl.id)
+                        .put("name", pl.name)
+                        .put("uuid", pl.uuid())
+                        .put("usid", pl.usid())
+                        .put("team", pl.team().id)
+                        .put("teamName", pl.team().name)
+                        .put("admin", pl.admin)
+                        .put("dead", pl.dead())
+                        // 观察者的单位会被每 tick 清掉，这里能直接看出清没清干净
+                        .put("hasUnit", pl.unit() != null)
+                        .put("unitType", pl.unit() == null ? "" : pl.unit().type.name)
+                        .put("observer", AIArena.observers.contains(pl.uuid()))
+                        .toString());
+                }
+                arr.append(']');
+                return Json.ok(new Json.Obj()
+                    .put("count", mindustry.gen.Groups.player.size())
+                    .putRaw("players", arr.toString()).toString());
+            }
+
+            int pid = (int) p.getLong("player", -1);
+            var pl = pid >= 0 ? mindustry.gen.Groups.player.getByID(pid) : null;
+            if (pl == null) return Json.error(1002, "player not found: " + pid);
+
+            // 玩家可能正好在这个 tick 断开，con 会变成 null。
+            // 直接往下走会抛 NPE（"Cannot read field hasConnected because p.con is null"），
+            // 而那个异常发生在引擎的 player 遍历里，会把整个服务器打挂。
+            if (pl.con == null) {
+                return Json.error(1005, "player " + pid + " has no active connection (disconnected?)");
+            }
+
+            try {
+                switch (action) {
+                    case "observe" -> {
+                        // 观战者 = spectator 标志（永不生成单位）+ admin + 指定视角。
+                        //
+                        // 视角由队伍决定，而且是**每客户端**的：
+                        //   队伍 = 真实队伍 → 引擎按那个队的视野同步实体，客户端画那个队的迷雾
+                        //   队伍 = derelict  → NetServer 判定为全图，发全部实体，客户端不画迷雾
+                        //
+                        // 关键：**不动 state.rules.fog**。关掉全局迷雾会让 AI 也失去
+                        // 视野约束 —— 那是把「谁能看见」这个每客户端的问题当成了全局开关。
+                        int view = (int) p.getLong("view", AIArena.DEFAULT_VIEW);
+                        if (view >= Team.all.length) {
+                            return Json.error(1001, "view team id out of range: " + view);
+                        }
+                        AIArena.makeObserver(pl, view);
+
+                        return Json.ok(new Json.Obj()
+                            .put("message", "player " + pl.name + " is now a spectator"
+                                            + " (no units ever, admin, view="
+                                            + (view < 0 ? "all" : Team.get(view).name) + ")")
+                            .put("team", pl.team().id)
+                            .put("view", view)
+                            .put("spectator", pl.spectator).toString());
+                    }
+                    case "unobserve" -> {
+                        AIArena.clearObserver(pl);
+                        return Json.ok(new Json.Obj()
+                            .put("message", "player " + pl.name + " is no longer a spectator")
+                            .put("spectator", pl.spectator).toString());
+                    }
+                    case "referee" -> {
+                        // 把观战者切到全图裁判视角（只影响这一个客户端）。
+                        int view = "false".equalsIgnoreCase(p.get("on", "true")) ? -2 : -1;
+                        if (view == -2) {
+                            // 关掉裁判模式 = 切回自己所在队伍的视角
+                            int fallback = -1;
+                            for (var td : Vars.state.teams.present) {
+                                if (td.cores.size > 0) { fallback = td.team.id; break; }
+                            }
+                            AIArena.setViewTeam(pl, fallback);
+                            return Json.ok(new Json.Obj()
+                                .put("message", "referee mode off")
+                                .put("view", fallback)
+                                .put("team", pl.team().name).toString());
+                        }
+                        AIArena.setViewTeam(pl, -1);
+                        return Json.ok(new Json.Obj()
+                            .put("message", "referee mode on (full map, this client only)")
+                            .put("view", -1)
+                            .put("team", pl.team().name).toString());
+                    }
+                    case "team" -> {
+                        int tid = (int) p.getLong("team", -1);
+                        if (tid < 0 || tid >= Team.all.length) {
+                            return Json.error(1001, "required: team=<id>");
+                        }
+                        Team t = Team.get(tid);
+
+                        if (pl.spectator) {
+                            // 观战者换视角：服务端换队 + 重发世界数据，
+                            // 否则客户端还拿着旧队伍过滤过的实体（Tab 切队没反应就是这个原因）
+                            AIArena.setViewTeam(pl, tid);
+                        } else {
+                            pl.team(t);
+                            // 换队后必须清掉旧单位，否则视野还挂在旧队伍上
+                            pl.clearUnit();
+                        }
+                        return Json.ok(new Json.Obj()
+                            .put("message", "player " + pl.name + " -> team " + t.name
+                                            + (pl.spectator ? " (view)" : ""))
+                            .put("team", t.id).put("teamName", t.name)
+                            .put("spectator", pl.spectator).toString());
+                    }
+                    case "admin" -> {
+                        Vars.netServer.admins.adminPlayer(pl.getInfo().id, pl.usid());
+                        pl.admin = true;
+                        return Json.ok(new Json.Obj()
+                            .put("message", "player " + pl.name + " granted admin").toString());
+                    }
+                    default -> {
+                        return Json.error(1001, "unknown action: " + action);
+                    }
+                }
+            } catch (Throwable t) {
+                return Json.error(1500, "player admin action failed: " + t);
+            }
+        });
+    }
+
+    /**
      * 观战信息（DESIGN.md P5）。
      *
      * GET /v1/{agent}/observe
@@ -713,6 +2403,41 @@ public final class HttpApi {
      * 这是「AI 能知道什么」的一部分 —— 玩家打开建造菜单能看到全部可建方块，
      * 所以 AI 也应该能拿到同一份清单，包括每种方块的成本与尺寸。
      */
+    /**
+     * 单位工厂的可选产线，序列化成 JSON 数组；非工厂方块返回空数组。
+     *
+     * 有了它，AI 才能从 /content 自己发现「哪些方块能造兵、造什么、要什么料、要多久」，
+     * 而不是把 air-factory + flare 这种知识硬编码进脚本 —— 换地图或换版本就失效。
+     */
+    private static String factoryPlansJson(Block b) {
+        StringBuilder sb = new StringBuilder("[");
+        if (b instanceof mindustry.world.blocks.units.UnitFactory uf) {
+            boolean first = true;
+            for (var plan : uf.plans) {
+                if (!first) sb.append(',');
+                first = false;
+
+                StringBuilder req = new StringBuilder("{");
+                boolean rf = true;
+                for (var stack : plan.requirements) {
+                    if (!rf) req.append(',');
+                    rf = false;
+                    req.append(Json.str(stack.item.name)).append(':').append(stack.amount);
+                }
+                req.append('}');
+
+                sb.append(new Json.Obj()
+                    .put("unit", plan.unit.name)
+                    .put("timeTicks", (int) plan.time)
+                    .put("timeSeconds", plan.time / 60f)
+                    .put("flying", plan.unit.flying)
+                    .put("health", plan.unit.health)
+                    .putRaw("requirements", req.toString())
+                    .toString());
+            }
+        }
+        return sb.append(']').toString();
+    }
     private static void handleContent(HttpExchange ex, AIArena.Agent agent) {
         postToGame(ex, () -> {
             StringBuilder blocks = new StringBuilder("[");
@@ -738,7 +2463,9 @@ public final class HttpApi {
                     .put("size", b.size)
                     .put("health", b.health)
                     .put("category", b.category == null ? "" : b.category.name())
+                    .put("hasPower", b.hasPower)
                     .putRaw("cost", req.toString())
+                    .putRaw("plans", factoryPlansJson(b))
                     .toString());
             }
             blocks.append(']');
@@ -965,6 +2692,14 @@ public final class HttpApi {
                 case "enter"   -> Commander.control(team, unitId, true);
                 case "release" -> Commander.control(team, unitId, false);
                 case "move"    -> Commander.moveControl(team, x, y);
+                case "order"   -> Commander.order(team, p.getInt("unit", -1), x, y);
+                case "stopmove"-> Commander.stopOrder(team, p.getInt("unit", -1));
+                case "orders"  -> Actor.Result.ok(Commander.ordersJson());
+                case "warp"    -> Commander.warp(team, p.getInt("unit", -1), x, y);
+                case "pos"     -> Commander.livePos(team, p.getInt("unit", -1));
+                case "probe"   -> Actor.Result.ok(Commander.probeJson());
+                case "ticks"   -> Actor.Result.ok("{\"tickMoveOrders\":" + Commander.tickCount()
+                                     + ",\"applied\":" + Commander.applyCount() + "}");
                 case "fire"    -> Commander.fireControl(team, x, y, p.getBool("on", true));
                 default        -> Actor.Result.err(1001, "unknown op: " + op);
             };
@@ -1170,9 +2905,16 @@ public final class HttpApi {
             // 因此保持关闭。PvP 的真正防线由核心自身的射程与单位承担。
             r.polygonCoreProtection = false;
             r.enemyCoreBuildRadius = 0f;
-            // 新放下的核心是空的，BuilderComp 的 hasAll 资源检查会挡住建造。
-            // 竞技场场景先用无限资源打通链路，资源规则留待 P4 完善。
-            r.infiniteResources = true;
+            // 资源和建造都不免费 —— 这是竞技场的基本前提。
+            //
+            // 早期为了打通链路把这里设成 true，结果整套经济被抹掉：建造不要材料、
+            // 工厂不要物料，「谁先攒出产能」这个维度直接消失，对局退化成两个脚本对撞。
+            // 现在必须靠真实产能：挖矿 → 矿机/传送带 → 工厂 → 出兵。
+            //
+            // 核心的初始库存来自地图定义，够放下第一批建筑；不够时可以让核心单位
+            // 手动挖矿（原版 MinerComp 路径，见 /mine），挖到的矿在 mineTransferRange
+            // 内会直接进核心。
+            r.infiniteResources = false;
             r.buildCostMultiplier = 1f;
             r.buildSpeedMultiplier = 1f;
 
@@ -1202,7 +2944,9 @@ public final class HttpApi {
             final boolean fOfficialPvp = officialPvp;
             final StringBuilder fLog = log;
 
-            arc.util.Time.run(2f, () -> {
+            final int[] attempt = {0};
+            final Runnable[] phase2 = new Runnable[1];
+            phase2[0] = () -> {
               try {
                 StringBuilder lg = fLog;
 
@@ -1213,6 +2957,27 @@ public final class HttpApi {
                     if (td.cores.size > 0 && td.team != Team.derelict) {
                         mapCoreTeams.add(td.team);
                     }
+                }
+
+                // ⚠ 地图自带核心还没填充时**必须重试，不能回落**。
+                //
+                // 回落意味着 alpha/beta 绑到配置里的 team 100/101 —— 那两队在这张图上
+                // 没有核心，于是 PlayerComp.checkSpawn() 找不到 core、永远不给单位；
+                // 没有单位也没有核心，队伍视野就是零，什么都看不见。
+                // 表现出来正是「AI 开局没视野、完全不动」。实测根因在此，不是迷雾本身。
+                //
+                // 官方 PvP 图一定有核心队，所以「空」只可能是还没填充完。
+                if (mapCoreTeams.isEmpty() && fOfficialPvp && attempt[0] < 40) {
+                    attempt[0]++;
+                    if (attempt[0] == 1 || attempt[0] % 10 == 0) {
+                        lg.append("waiting for map core teams (attempt ").append(attempt[0]).append("); ");
+                    }
+                    arc.util.Time.run(2f, phase2[0]);
+                    return;
+                }
+                if (mapCoreTeams.isEmpty()) {
+                    lg.append("WARN: no map core teams after ").append(attempt[0])
+                      .append(" attempts; falling back to config teams; ");
                 }
                 StringBuilder coreTeamNames = new StringBuilder("[");
                 for (int k = 0; k < mapCoreTeams.size(); k++) {
@@ -1299,6 +3064,8 @@ public final class HttpApi {
             StringBuilder placed = new StringBuilder("[");
             boolean firstPlaced = true;
             java.util.List<int[]> takenSpots = new java.util.ArrayList<>();
+            // 本次 setup 已经自建的核心位置 —— 后续 findCoreSpot 要靠它把核心拉开
+            java.util.List<int[]> takenCoreSpots = new java.util.ArrayList<>();
 
             // ---- 4a. 优先接管地图自带的 PvP 核心 ----
             //
@@ -1313,14 +3080,20 @@ public final class HttpApi {
                 if (bindIndex < mapCoreTeams.size()) {
                     Team t = mapCoreTeams.get(bindIndex++);
                     a.bindTeam(t.id);
+                    // 地图自带的 PvP 核心带着满库存，这里立刻换成启动资源
+                    resetCoreItems(t);
 
-                    // 地图已有核心，只需补一个建造单位
-                    int[] unitSpot = wantUnits ? spawnBuilder(t, a.id, takenSpots, log) : null;
+                    // 不预置任何单位。
+                    //
+                    // 引擎的 PlayerComp.update() 会自动给「没有单位的玩家」从核心
+                    // 生成初始单位（core.requestSpawn(self())），所以只要给 agent
+                    // 建一个真实的 Player 并加入队伍，它就会像真人玩家一样拿到单位。
+                    // 早期版本在这里手动 spawnBuilder 塞了一个 poly，等于白送 AI
+                    // 一个建造单位 —— 那是玩家没有的优势。
+                    String pname = spawnAgentPlayer(a, t, log);
 
                     log.append("bind[").append(a.id).append("]->").append(t.name);
-                    if (unitSpot != null) {
-                        log.append("@").append(unitSpot[0]).append(",").append(unitSpot[1]);
-                    }
+                    if (pname != null) log.append(" as ").append(pname);
                     log.append("; ");
 
                     if (!firstPlaced) placed.append(',');
@@ -1330,9 +3103,9 @@ public final class HttpApi {
                     Json.Obj o = new Json.Obj()
                         .put("agent", a.id).put("team", t.id)
                         .put("teamName", t.name)
-                        .put("coreSource", "map");
+                        .put("coreSource", "map")
+                        .put("player", pname == null ? "" : pname);
                     if (core != null) o.put("coreX", core.tileX()).put("coreY", core.tileY());
-                    if (unitSpot != null) o.put("unitX", unitSpot[0]).put("unitY", unitSpot[1]);
                     placed.append(o.toString());
                 } else {
                     a.resetTeam();
@@ -1345,37 +3118,67 @@ public final class HttpApi {
                 Team t = a.team();
                 if (t == null) continue;
 
-                int[] spot = findCoreSpot(coreBlock, t);
-                if (spot == null) {
+                // 地图核心不够时，为剩余 agent 自建核心（cores=auto，默认）。
+                //
+                // 官方 PvP 图只给两个核心队（veins/glacier 是 2 个，passage 是 2 队
+                // 共 5 个核心），而配置里可以有 4 个 agent。要么只跑 2 个 AI
+                // （cores=none），要么给多出来的队伍补核心。
+                //
+                // 补核心时位置必须拉开 —— 见 findCoreSpot 的注释，早期版本把它们
+                // 堆在了地图正中央。
+                if (!"auto".equalsIgnoreCase(p.get("cores", "auto"))) {
+                    log.append("skip core for ").append(a.id).append(" (cores=none); ");
+                    a.resetTeam();
+                    continue;
+                }
+
+                // 候选点按评分排序，逐个试到引擎点头为止。
+                //
+                // 每次尝试都会先铲掉自然方块、再铺 coreZone，然后问 validPlace。
+                // 只要有一条引擎内部的检查不通过就换下一个候选 —— 这比在外面
+                // 复刻 validPlace 的每一条分支可靠得多。
+                java.util.List<int[]> candidates = findCoreSpot(coreBlock, t, takenCoreSpots);
+                if (candidates.isEmpty()) {
                     log.append("no core spot for ").append(a.id).append("; ");
                     continue;
                 }
 
-                // 先铺 coreZone 地板 —— 这是核心能通过 validPlace 的前提。
-                // 否则 BuildVisibility.coreZoneOnly.visible() 为 false，
-                // Block.isHidden() 返回 true，validPlace 从第一个检查就失败。
-                layCoreZone(spot[0], spot[1], coreBlock.size);
+                int[] spot = null;
+                int[] firstTried = null;
+                for (int[] cand : candidates) {
+                    if (firstTried == null) firstTried = cand;
 
-                Tile tile = Vars.world.tile(spot[0], spot[1]);
-                if (!mindustry.world.Build.validPlace(coreBlock, t, spot[0], spot[1], 0)) {
-                    // 逐项拆解 validPlace 的后续检查，定位到底卡在哪一步
-                    boolean canPlaceOn = coreBlock.canPlaceOn(tile, t, 0);
-                    boolean noOverlap = mindustry.world.Build.checkNoUnitOverlap(coreBlock, spot[0], spot[1]);
-                    boolean ignoreUnits = mindustry.world.Build.validPlaceIgnoreUnits(
-                        coreBlock, t, spot[0], spot[1], 0, true, true);
+                    clearNaturalBlocks(cand[0], cand[1], coreBlock.size);
+                    layCoreZone(cand[0], cand[1], coreBlock.size);
 
-                    log.append("validPlace=false after coreZone for ").append(a.id)
-                       .append("{canPlaceOn=").append(canPlaceOn)
-                       .append(",noUnitOverlap=").append(noOverlap)
-                       .append(",ignoreUnits=").append(ignoreUnits)
-                       .append(",floor=").append(tile == null ? "null" : tile.floor().name)
-                       .append(",allowCore=").append(tile == null ? "?" : tile.floor().allowCorePlacement)
-                       .append(",existingBlock=").append(tile == null ? "?" : tile.block().name)
+                    if (mindustry.world.Build.validPlace(coreBlock, t, cand[0], cand[1], 0)) {
+                        spot = cand;
+                        break;
+                    }
+                }
+
+                if (spot == null) {
+                    // 全部候选都被引擎否掉了 —— 把第一个候选的失败细节留下，便于定位
+                    Tile ft = Vars.world.tile(firstTried[0], firstTried[1]);
+                    log.append("no core spot for ").append(a.id)
+                       .append(" (tried ").append(candidates.size()).append(" candidates; first ")
+                       .append(firstTried[0]).append(",").append(firstTried[1])
+                       .append("{canPlaceOn=").append(coreBlock.canPlaceOn(ft, t, 0))
+                       .append(",noUnitOverlap=").append(mindustry.world.Build.checkNoUnitOverlap(coreBlock, firstTried[0], firstTried[1]))
+                       .append(",ignoreUnits=").append(mindustry.world.Build.validPlaceIgnoreUnits(coreBlock, t, firstTried[0], firstTried[1], 0, true, true))
+                       .append(",floor=").append(ft == null ? "null" : ft.floor().name)
                        .append(",polyProtect=").append(r.polygonCoreProtection)
-                       .append("}; ");
+                       .append("}); ");
                     continue;
                 }
+
+                takenCoreSpots.add(spot);
+                Tile tile = Vars.world.tile(spot[0], spot[1]);
                 tile.setBlock(coreBlock, t, 0);
+                // 核心一落地就把库存设成启动资源。
+                // 不能只靠最后遍历 teams.present —— 刚 setBlock 出来的核心
+                // 所属的 TeamData 还没进 present，实测那样会漏掉 agent3/agent4。
+                resetCoreItems(t);
                 log.append("core[").append(a.id).append("]@")
                    .append(spot[0]).append(",").append(spot[1]).append("; ");
 
@@ -1385,23 +3188,56 @@ public final class HttpApi {
                     .put("agent", a.id).put("team", t.id)
                     .put("coreX", spot[0]).put("coreY", spot[1]).toString());
 
-                // ---- 5. 生成建造单位 ----
-                if (wantUnits) {
-                    mindustry.type.UnitType ut = pickBuilderUnit();
-                    if (ut != null) {
-                        mindustry.gen.Unit u = ut.create(t);
-                        u.set(spot[0] * Vars.tilesize + Vars.tilesize / 2f,
-                              spot[1] * Vars.tilesize + Vars.tilesize / 2f);
-                        u.add();
-                        log.append("unit[").append(a.id).append("]=").append(ut.name).append("; ");
-                    }
-                }
+                // ---- 5. 不预置单位 ----
+                //
+                // 自建核心的 agent 同样只建 Player，单位交给引擎自动生成。
+                // 之前这里手搓了一个 poly，等于白送 AI 一个建造单位。
+                spawnAgentPlayer(a, t, log);
             }
+
+            // ---- 6. 统一启动资源 ----
+            //
+            // 地图自带的 PvP 核心会带满一整套库存（veins 上每种 2000），
+            // 等于把经济起点抬到「什么都有」—— 建造不花钱、冶炼不用建、
+            // 整条产线形同虚设。竞技场要的是公平且有限的起手。
+            //
+            // 只给铜和铅各 500，其余全部归零。够放：矿机(铜12)、传送带(铜1)、
+            // 冶炼厂(铜30+铅25)、发电机(铜25+铅15)、节点(铜2+铅6)、炮塔(铜35)。
+            // 硅、石墨、钛、钍一律为 0 —— 想要就得自己挖、自己炼。
+            log.append(applyStartingItems(log));
+
             placed.append(']');
 
             // 恢复 editor 与 staticFog 状态
             r.editor = prevEditor;
             r.staticFog = prevStaticFog;
+
+            // ⚠ 必须**在恢复 staticFog 之后**补推一次迷雾事件。
+            //
+            // 上面为了绕开 validPlace 的「该格必须已探索」死循环，把 staticFog 临时
+            // 关掉了。而 FogControl 的 TileChangeEvent 处理器里有一道
+            //     if(state.rules.staticFog){ pushEvent(...); }
+            // 所以整个放置期间，新核心的迷雾事件**全被静默丢弃**。
+            // 等这里恢复成 true，事件早没了 —— 结果是 team#102/103 的
+            // staticData 永远是全零位图。
+            //
+            // 后果不止是「自己基地看不见」：客户端切到这一队时
+            // FogRenderer 拿到的是一张全零的探索位图，于是整屏全黑，
+            // 而 UI 层（队伍名、核心库存）却完全正常 —— 非常容易被误判成
+            // 「视角绑定错了」或「相机问题」。
+            //
+            // 地图自带的核心不受影响，因为它们的迷雾是 WorldLoadEvent 时
+            // pushStaticBlocks() 一次性推的，走的不是这条路径。
+            if (r.fog && r.staticFog) {
+                // 标记：让逐帧循环在接下来一段时间里持续补推。
+                //
+                // 不能就地做，也不能只 Time.run 一次 —— 实测核心放进世界之后，
+                // 它要过一会儿才真正出现在 Groups.build 里（就地和 30 帧后都只
+                // 数到地图自带的那 2 个核心）。而 forceUpdate 是幂等的：
+                // 重复推只是把同一个圆重画一遍，没有副作用。
+                // 所以这里挂个时间窗，由 update 循环反复补，直到世界稳定。
+                AIArena.FOG_REPUSH_UNTIL = arc.util.Time.millis() + 20_000L;
+            }
 
             // 诊断：单位是否真的进入了世界
             log.append("worldUnits=").append(mindustry.gen.Groups.unit.size())
@@ -1429,7 +3265,8 @@ public final class HttpApi {
                 AIArena.log("setup phase2 failed: " + t);
                 future.complete(Json.error(1500, "setup phase2: " + t));
               }
-            });
+            };
+            arc.util.Time.run(2f, phase2[0]);
 
           } catch (Throwable t) {
             AIArena.log("setup phase1 failed: " + t);
@@ -1460,6 +3297,42 @@ public final class HttpApi {
      * 因此正确流程是：先铺 coreZone 地板，再走正常的 validPlace 放核心。
      * 见 CoreBlock.canPlaceOn（CoreBlock.java:184）与 BuildVisibility.java:14。
      */
+    /**
+     * 给 agent 创建一个真实玩家并绑定。
+     *
+     * 为什么这样做：
+     *   Mindustry 的 PlayerComp.update() 会自动给「没有单位的玩家」从核心生成
+     *   初始单位（core.requestSpawn(self())，见 PlayerComp.java:233-241）。
+     *   所以只要 agent 对应一个真实 Player 并加入队伍，引擎就会像对待真人玩家
+     *   一样给它单位 —— 不需要手动 spawn，也不该预置任何兵和建筑。
+     *
+     * 这个 Player 没有网络连接（con == null），也就是 Player.isLocal() 为 true。
+     * 对本竞技场没有影响：AI 全走 HTTP，不依赖网络同步；而服务端逻辑
+     * （PlayerComp、BuilderComp、权限检查）对 local 玩家一样生效。
+     *
+     * @return 玩家名，失败返回 null
+     */
+    static String spawnAgentPlayer(AIArena.Agent a, Team t, StringBuilder log) {
+        try {
+            var p = mindustry.gen.Player.create();
+            String name = "[AI] " + a.id;
+            p.name = name;
+            p.team(t);
+            p.admin = a.admin;
+            p.add();
+
+            a.bindPlayer(p);
+
+            // 立刻让它尝试生成一次，不用等 deathTimer 走完
+            try { p.checkSpawn(); } catch (Throwable ignored) {}
+
+            return name;
+        } catch (Throwable e) {
+            log.append("player[").append(a.id).append("] failed: ").append(e).append("; ");
+            return null;
+        }
+    }
+
     /** 在队伍的核心附近生成一个建造单位。返回生成的格坐标，失败时返回 null。 */
     private static int[] spawnBuilder(Team t, String agentId, java.util.List<int[]> takenSpots,
                                       StringBuilder log) {
@@ -1502,31 +3375,181 @@ public final class HttpApi {
         return false;
     }
 
-    private static int[] findCoreSpot(Block coreBlock, Team team) {
+    /** 自建核心之间、以及自建核心与地图自带核心之间的最小间距（格）。 */
+    private static final float MIN_CORE_SEP_TILES = 55f;
+
+    /**
+     * 给额外队伍找一块放核心的地方。
+     *
+     * 早期版本从**地图中心**向外螺旋搜索，结果 veins 上两个自建核心落在
+     * (175,100) 和 (178,97) —— 也就是地图正中央、彼此相距 3 格。看着像凭空
+     * 冒出来的一堆建筑，而且位置完全不对等。
+     *
+     * 现在改成全局择优：候选点必须离所有已有核心至少 MIN_CORE_SEP_TILES 格，
+     * 评分同时奖励「离最近的核心远」和「离地图中心远」，于是额外核心自然被
+     * 推到空旷的角落，彼此拉开。
+     */
+    private static java.util.List<int[]> findCoreSpot(Block coreBlock, Team team, java.util.List<int[]> placed) {
         int size = Math.max(1, coreBlock.size);
         int w = Vars.world.width(), h = Vars.world.height();
-        int cx = w / 2, cy = h / 2;
 
-        for (int radius = 0; radius < Math.max(w, h); radius += 3) {
-            for (int dy = -radius; dy <= radius; dy += 3) {
-                for (int dx = -radius; dx <= radius; dx += 3) {
-                    int x = cx + dx, y = cy + dy;
-                    if (isClearArea(x, y, size, w, h)) return new int[]{x, y};
+        // 已有核心：地图自带的 + 本次 setup 已经放下的
+        java.util.List<int[]> existing = new java.util.ArrayList<>();
+        for (Team tt : Team.all) {
+            try {
+                for (var core : tt.cores()) {
+                    if (core != null) existing.add(new int[]{core.tileX(), core.tileY()});
+                }
+            } catch (Throwable ignored) {}
+        }
+        existing.addAll(placed);
+
+        // 返回**排序后的候选列表**，由调用方逐个试到 validPlace 通过为止。
+        //
+        // 早期这里是「挑一个最优的，然后祈祷它能过」。但 validPlace 内部的检查
+        // 分支很多（核心半径、暗度、地形、浅水……），想在外面完整镜像每一条
+        // 不现实，漏掉任何一条就会像 agent4 那样拿不到核心 —— 表现是
+        // canPlaceOn=true / noUnitOverlap=true 但 ignoreUnits=false，
+        // 光看这三个布尔值根本看不出是哪一步否掉的。
+        //
+        // 与其猜，不如让引擎自己裁决：按评分从好到坏试。
+        java.util.List<int[]> spots = new java.util.ArrayList<>();
+        collectCoreSpots(size, w, h, existing, false, spots);
+        if (spots.isEmpty()) {
+            // 自然地形挡路时允许推平一小块 —— 给一个队伍开辟出生点是必要的，
+            // 但绝不碰任何已有建筑。
+            collectCoreSpots(size, w, h, existing, true, spots);
+        }
+        return spots;
+    }
+
+    /**
+     * 收集候选位置并按评分排序（离其他核心越远、离地图中心越远越好）。
+     *
+     * @param allowClearing 是否允许候选点上有自然方块（会被推平）
+     */
+    private static void collectCoreSpots(int size, int w, int h,
+                                         java.util.List<int[]> existing, boolean allowClearing,
+                                         java.util.List<int[]> out) {
+        arc.struct.Seq<int[]> scored = new arc.struct.Seq<>();
+
+        for (int y = 3; y < h - size - 3; y += 3) {
+            for (int x = 3; x < w - size - 3; x += 3) {
+                if (!areaFree(x, y, size, w, h, allowClearing)) continue;
+
+                float nearest = Float.MAX_VALUE;
+                for (int[] c : existing) {
+                    float d = (float) Math.hypot(x - c[0], y - c[1]);
+                    if (d < nearest) nearest = d;
+                }
+
+                // 离其他核心越远越好，也离地图正中央越远越好 ——
+                // 核心堆在中路既难看也不公平
+                float fromCenter = (float) Math.hypot(x - w / 2f, y - h / 2f);
+                float score = nearest + fromCenter * 0.5f;
+
+                scored.add(new int[]{x, y, (int) (score * 10f)});
+            }
+        }
+
+        scored.sort((a, b) -> Integer.compare(b[2], a[2]));
+
+        // 上限：试太多个会让 setup 变慢，而且每次尝试都会改动地图
+        int limit = Math.min(scored.size, 24);
+        for (int i = 0; i < limit; i++) {
+            int[] s = scored.get(i);
+            out.add(new int[]{s[0], s[1]});
+        }
+    }
+
+
+    /**
+     * 区域是否可用作核心位置。
+     *
+     * allowClearing = false：要求全是空地。
+     * allowClearing = true ：允许有自然方块（会被推平），但不允许有建筑。
+     */
+    private static boolean areaFree(int x, int y, int size, int w, int h, boolean allowClearing) {
+        if (x < 1 || y < 1 || x + size > w - 1 || y + size > h - 1) return false;
+        for (int dy = 0; dy < size; dy++) {
+            for (int dx = 0; dx < size; dx++) {
+                Tile t = Vars.world.tile(x + dx, y + dy);
+                if (t == null) return false;
+                // 任何情况下都不动别人的建筑
+                if (t.build != null) return false;
+                if (!allowClearing) {
+                    if (t.block() != mindustry.content.Blocks.air) return false;
+                    if (t.solid()) return false;
                 }
             }
         }
-        for (int y = 2; y < h - size - 2; y++) {
-            for (int x = 2; x < w - size - 2; x++) {
-                if (isClearArea(x, y, size, w, h)) return new int[]{x, y};
+        return true;
+    }
+
+    /** 把区域内的自然方块铲平，给核心腾地方。不动任何建筑。 */
+    private static void clearNaturalBlocks(int x, int y, int size) {
+        for (int dy = 0; dy < size; dy++) {
+            for (int dx = 0; dx < size; dx++) {
+                Tile t = Vars.world.tile(x + dx, y + dy);
+                if (t == null) continue;
+                if (t.build != null) continue;
+                if (t.block() != mindustry.content.Blocks.air) {
+                    t.setBlock(mindustry.content.Blocks.air);
+                }
             }
         }
-        return null;
     }
 
     /**
      * 在指定区域铺 coreZone 地板。
      * 这是核心能够通过 validPlace 的前提，也是自制 PvP 地图必须做的事。
      */
+    /** 统一启动资源：铜 500 + 铅 500，其余归零。 */
+    public static final int START_COPPER = 500;
+    public static final int START_LEAD = 500;
+
+    /**
+     * 把每个有核心的队伍库存重置成统一的启动资源。
+     *
+     * 地图自带的 PvP 核心带着满库存（veins 上每种 2000），不清掉的话
+     * 「经济」这一层根本不存在。这里按物品表逐项清零再补铜铅，
+     * 不依赖 ItemModule.clear() 的具体实现，避免漏掉某项。
+     *
+     * @return 写进 setup 日志的一段摘要
+     */
+    private static String applyStartingItems(StringBuilder log) {
+        StringBuilder sb = new StringBuilder();
+        for (var td : Vars.state.teams.present) {
+            if (td.team == Team.derelict) continue;
+            if (resetCoreItems(td.team)) {
+                sb.append("startItems[").append(td.team.name).append("]=")
+                  .append(START_COPPER).append("c/").append(START_LEAD).append("l; ");
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 把一支队伍的核心库存重置成启动资源。
+     *
+     * ⚠ 必须**核心一建好就调用**，不能只靠最后遍历 teams.present。
+     * 自建核心是直接 tile.setBlock() 出来的，那一刻它所属的 TeamData
+     * 还没进 teams.present —— 实测最后统一清点时只清到了地图自带的
+     * sharded/crux，agent3/agent4 的核心库存仍是空的。
+     *
+     * @return 是否真的找到了核心并重置
+     */
+    private static boolean resetCoreItems(Team team) {
+        if (team == null || team == Team.derelict) return false;
+        var core = team.core();
+        if (core == null || core.items == null) return false;
+
+        core.items.clear();
+        for (mindustry.type.Item it : Vars.content.items()) core.items.set(it, 0);
+        core.items.set(mindustry.content.Items.copper, START_COPPER);
+        core.items.set(mindustry.content.Items.lead, START_LEAD);
+        return true;
+    }
     private static void layCoreZone(int x, int y, int size) {
         mindustry.world.Block zone = Vars.content.block("core-zone");
         if (zone == null || !(zone instanceof mindustry.world.blocks.environment.Floor floor)) return;
@@ -1630,7 +3653,195 @@ public final class HttpApi {
         catch (Throwable t) { return false; }
     }
 
-    private static String visibleUnits(Snapshot.State s, int myTeam, boolean admin) {
+    /**
+     * 写入液体信息。
+     *
+     * Mindustry 里「液体」不是独立的一层 —— 液体本身就是一种 Floor
+     * （water / deep-water / oil / slag / cryofluid / arkycite），
+     * 靠 Floor.isLiquid 标记。地板还能声明 liquidDrop，那是抽水机的产出。
+     *
+     * 所以 /map 只给 floor 名字是不够的：调用方无法判断那到底是地面还是水面，
+     * 也拿不到深水标记（drownTime > 0，地面单位不能站）。
+     */
+    private static void putLiquidInfo(Json.Obj o, Tile t) {
+        var fl = t.floor();
+        if (fl == null) { o.put("liquid", "air"); return; }
+        if (fl.isLiquid) o.put("liquid", fl.name);
+        if (fl.liquidDrop != null) o.put("liquidDrop", fl.liquidDrop.name);
+        if (fl.drownTime > 0f) o.put("deep", true);
+    }
+
+    /**
+     * 取某个频道当前帧的 JSON。供 WebSocket 推送使用。
+     *
+     * 返回 null 表示「这个频道此刻没有内容」。
+     * 必须在**游戏主线程**调用 —— 它读 Vars.state / Groups，和 HTTP handler 一样。
+     */
+    static String channelJson(String channel, AIArena.Agent agent) {
+        if (agent == null) return null;
+        Team team = agent.team();
+        if (team == null) return null;
+        Snapshot.State s = Snapshot.get();
+
+        switch (channel) {
+            case "state" -> {
+                return new Json.Obj()
+                    .put("tick", s.tick)
+                    .put("playing", Vars.state.isPlaying())
+                    .put("paused", Vars.state.isPaused())
+                    .put("fog", Vars.state.rules.fog)
+                    .put("team", team.name).put("teamId", team.id)
+                    .put("worldW", Vars.world.width()).put("worldH", Vars.world.height())
+                    .put("units", s.units.length).put("buildings", s.builds.length)
+                    .toString();
+            }
+            case "units" -> {
+                return visibleUnits(s, team.id, false);
+            }
+            case "buildings" -> {
+                return visibleBuildings(s, team.id, false);
+            }
+            case "factory" -> {
+                return factoryJson(team);
+            }
+            case "drill" -> {
+                return drillJson(team);
+            }
+            case "events" -> {
+                return EventLog.recentJson(40);
+            }
+            default -> {
+                return null;
+            }
+        }
+    }
+
+    /** 单位工厂的生产状态，JSON 数组。REST 的 /factory 与 WS 的 factory 频道共用。 */
+    static String factoryJson(Team team) {
+        StringBuilder arr = new StringBuilder("[");
+        boolean first = true;
+        for (mindustry.gen.Building b : team.data().buildings) {
+            boolean isFactory = b instanceof mindustry.world.blocks.units.UnitFactory.UnitFactoryBuild;
+            boolean isAssembler = b instanceof mindustry.world.blocks.units.UnitAssembler.UnitAssemblerBuild;
+            if (!isFactory && !isAssembler) continue;
+            if (Vars.state.rules.fog && !Vars.fogControl.isVisibleTile(team, b.tileX(), b.tileY())) continue;
+
+            if (!first) arr.append(',');
+            first = false;
+
+            Json.Obj o = new Json.Obj()
+                .put("x", b.tileX()).put("y", b.tileY())
+                .put("block", b.block.name)
+                .put("efficiency", b.efficiency)
+                .put("enabled", b.enabled)
+                .put("powered", b.power != null && b.power.status > 0f);
+
+            if (isFactory) {
+                var uf = (mindustry.world.blocks.units.UnitFactory.UnitFactoryBuild) b;
+                var ut = uf.unit();
+                o.put("plan", ut == null ? "" : ut.name);
+                o.put("progress", uf.fraction());
+                o.put("planIndex", uf.currentPlan);
+                o.put("payload", uf.payload == null ? "" : uf.payload.getClass().getSimpleName());
+                String puName = "";
+                if (uf.payload instanceof mindustry.world.blocks.payloads.UnitPayload) {
+                    puName = ((mindustry.world.blocks.payloads.UnitPayload) uf.payload).unit.type.name;
+                }
+                o.put("payloadUnit", puName);
+                o.put("rotation", uf.rotation);
+                o.put("shouldConsume", uf.shouldConsume());
+                o.put("activation", b.team.activateUnitFactories());
+                String frontName = "";
+                boolean frontSolid = false;
+                try {
+                    mindustry.gen.Building fr = uf.front();
+                    if (fr != null) {
+                        frontName = fr.block.name;
+                        frontSolid = fr.tile != null && fr.tile.solid();
+                    }
+                } catch (Throwable ignored) {}
+                o.put("front", frontName);
+                o.put("frontSolid", frontSolid);
+
+                StringBuilder req = new StringBuilder("{");
+                boolean rf = true;
+                if (ut != null && uf.currentPlan >= 0
+                    && uf.currentPlan < ((mindustry.world.blocks.units.UnitFactory) uf.block).plans.size) {
+                    for (var stack : ((mindustry.world.blocks.units.UnitFactory) uf.block).plans.get(uf.currentPlan).requirements) {
+                        if (!rf) req.append(',');
+                        rf = false;
+                        req.append(Json.str(stack.item.name)).append(':').append(stack.amount);
+                    }
+                }
+                req.append('}');
+                o.putRaw("requirements", req.toString());
+            }
+
+            StringBuilder inv = new StringBuilder("{");
+            boolean vf = true;
+            for (mindustry.type.Item it : Vars.content.items()) {
+                int amt = b.items.get(it);
+                if (amt <= 0) continue;
+                if (!vf) inv.append(',');
+                vf = false;
+                inv.append(Json.str(it.name)).append(':').append(amt);
+            }
+            inv.append('}');
+            o.putRaw("items", inv.toString());
+
+            arr.append(o.toString());
+        }
+        return arr.append(']').toString();
+    }
+
+    /** 矿机状态，JSON 数组。REST 的 /drill 与 WS 的 drill 频道共用。 */
+    static String drillJson(Team team) {
+        StringBuilder arr = new StringBuilder("[");
+        boolean first = true;
+        for (mindustry.gen.Building b : team.data().buildings) {
+            if (!(b instanceof mindustry.world.blocks.production.Drill.DrillBuild)) continue;
+            if (Vars.state.rules.fog && !Vars.fogControl.isVisibleTile(team, b.tileX(), b.tileY())) continue;
+
+            var d = (mindustry.world.blocks.production.Drill.DrillBuild) b;
+            var blk = (mindustry.world.blocks.production.Drill) b.block;
+
+            if (!first) arr.append(',');
+            first = false;
+
+            StringBuilder inv = new StringBuilder("{");
+            boolean vf = true;
+            for (mindustry.type.Item it : Vars.content.items()) {
+                int amt = b.items.get(it);
+                if (amt <= 0) continue;
+                if (!vf) inv.append(',');
+                vf = false;
+                inv.append(Json.str(it.name)).append(':').append(amt);
+            }
+            inv.append('}');
+
+            int oreH = d.dominantItem == null ? -1 : d.dominantItem.hardness;
+
+            arr.append(new Json.Obj()
+                .put("x", b.tileX()).put("y", b.tileY())
+                .put("block", b.block.name)
+                .put("tier", blk.tier)
+                .put("dominantItem", d.dominantItem == null ? "" : d.dominantItem.name)
+                .put("dominantItems", d.dominantItems)
+                .put("oreHardness", oreH)
+                .put("canMine", d.dominantItem != null && blk.tier >= oreH)
+                .put("progress", d.progress())
+                .put("warmup", d.warmup)
+                .put("lastDrillSpeed", d.lastDrillSpeed)
+                .put("efficiency", b.efficiency)
+                .put("enabled", b.enabled)
+                .put("full", b.items.total() >= b.block.itemCapacity)
+                .put("itemCapacity", b.block.itemCapacity)
+                .putRaw("items", inv.toString())
+                .toString());
+        }
+        return arr.append(']').toString();
+    }
+    static String visibleUnits(Snapshot.State s, int myTeam, boolean admin) {
         Team team = Team.get(myTeam);
         StringBuilder sb = new StringBuilder("[");
         boolean first = true;
@@ -1655,6 +3866,30 @@ public final class HttpApi {
                 .put("health", u.health).put("maxHealth", u.maxHealth)
                 .put("rotation", u.rotation).put("canBuild", u.canBuild)
                 .putRaw("stack", stack.toString());
+
+            // 开火状态：玩家看得见单位在射击（枪口火光、弹道）
+            if (u.shooting) o.put("shooting", true);
+
+            // 交战目标：位置是可见的（弹道往哪飞），但目标的身份要看它自己是否可见。
+            // 目标在雾里时只给方向、不给它是谁 —— 和玩家看到的一致。
+            if (!Float.isNaN(u.targetX)) {
+                o.put("targetX", u.targetX).put("targetY", u.targetY);
+                boolean tVisible = admin
+                    || u.targetTeam == myTeam
+                    || safeVisible(team, u.targetX, u.targetY);
+                if (tVisible) {
+                    if (u.targetId >= 0) o.put("targetId", u.targetId);
+                    if (u.targetType != null && !u.targetType.isEmpty()) o.put("targetType", u.targetType);
+                    if (u.targetTeam >= 0) o.put("targetTeam", u.targetTeam);
+                } else {
+                    o.put("targetHidden", true);
+                }
+            }
+
+            // 弹药。UnitType.ammoCapacity 默认 1、ammof() 对普通单位恒为 1，
+            // 所以 flare/gamma 这类永远显示 1/1；只有方块单位会真的变化。
+            o.put("ammo", u.ammo).put("ammoCapacity", u.ammoCapacity);
+
             if (u.controllerId >= 0) o.put("controller", u.controllerId);
             if (!u.command.isEmpty()) o.put("command", u.command);
             sb.append(o.toString());
@@ -1662,7 +3897,7 @@ public final class HttpApi {
         return sb.append(']').toString();
     }
 
-    private static String visibleBuildings(Snapshot.State s, int myTeam, boolean admin) {
+    static String visibleBuildings(Snapshot.State s, int myTeam, boolean admin) {
         Team team = Team.get(myTeam);
         StringBuilder sb = new StringBuilder("[");
         boolean first = true;
@@ -1691,8 +3926,41 @@ public final class HttpApi {
                 .put("x", b.x).put("y", b.y).put("team", b.team).put("block", b.block)
                 .put("health", b.health).put("maxHealth", b.maxHealth)
                 .put("enabled", b.enabled).put("efficiency", b.efficiency)
+                // 朝向：玩家看得见任何可见建筑的朝向（传送带流向、炮塔朝向、工厂出口）
+                .put("rotation", b.rotation)
                 .putRaw("items", its.toString())
                 .putRaw("liquids", lqs.toString());
+
+            // 电力：满足度无条件可见（就是屏幕上那根电力条）；
+            // 连线按「激光线可见、对端方块未必可见」处理 ——
+            // PowerNode.draw() 只对通过迷雾检查的建筑调用，但可见节点的激光线
+            // 会一直画到对端真实坐标，所以位置是玩家能看到的；
+            // 而雾里那一端是黑的，只知道位置、不知道是什么方块。
+            if (b.powerStatus >= 0f) {
+                o.put("powerStatus", b.powerStatus);
+                StringBuilder lk = new StringBuilder("[");
+                boolean lf = true;
+                int hidden = 0;
+                if (b.powerLinks != null) {
+                    for (int packed : b.powerLinks) {
+                        arc.math.geom.Point2 pt = arc.math.geom.Point2.unpack(packed);
+                        boolean vis = admin || safeVisibleTile(team, pt.x, pt.y);
+                        if (!vis) hidden++;
+                        if (!lf) lk.append(',');
+                        lf = false;
+                        Json.Obj lo = new Json.Obj().put("x", pt.x).put("y", pt.y).put("visible", vis);
+                        if (vis) {
+                            var tb = Vars.world.build(pt.x, pt.y);
+                            if (tb != null) lo.put("block", tb.block.name).put("team", tb.team.id);
+                        }
+                        lk.append(lo.toString());
+                    }
+                }
+                lk.append(']');
+                o.putRaw("powerLinks", lk.toString());
+                o.put("powerLinksHidden", hidden);
+            }
+
             if (b.config != null) o.put("config", b.config);
             if (b.constructing) o.put("constructing", true).put("buildProgress", b.buildProgress);
             sb.append(o.toString());

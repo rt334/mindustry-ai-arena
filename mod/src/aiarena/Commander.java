@@ -1,5 +1,6 @@
 package aiarena;
 
+import arc.math.Mathf;
 import arc.math.geom.Vec2;
 import mindustry.Vars;
 import mindustry.ai.UnitCommand;
@@ -223,6 +224,225 @@ public final class Commander {
         Shadow.at(team, u);
         mindustry.gen.Call.unitControl(shadow, u);
         return Actor.Result.ok("controlling " + u.type.name + " id=" + unitId);
+    }
+
+    /**
+     * 持续移动指令 —— 模拟玩家按住 WASD。
+     *
+     * 为什么不能只调一次 movePref：`Unit.movePref(Vec2)` 只是设置**单帧**的
+     * moveX/moveY，下一帧就被 `PlayerComp.update()` 按「当前输入」覆盖回 0。
+     * 实测调一次之后单位纹丝不动。
+     *
+     * 所以这里把目标存下来，由主循环每帧重新施加，直到抵达（或超时）。
+     *
+     * 为什么走这条路而不是 CommandAI：PvP 里队伍的单位控制器是 `Player`
+     * （影子玩家持有），`unit.isAI()` 为 false，`Call.unitControl` 会抛
+     * `ValidateException: Player attempted to control invalid unit`。
+     * 玩家本来也只能用 WASD 移动自己的单位 —— 这里就是等价物。
+     */
+    public static final class MoveOrder {
+        public final Team team;
+        public final float tx, ty;          // 地块坐标
+        public final long expiresAt;
+        public MoveOrder(Team team, float tx, float ty, long expiresAt) {
+            this.team = team; this.tx = tx; this.ty = ty; this.expiresAt = expiresAt;
+        }
+    }
+
+    private static final java.util.Map<Integer, MoveOrder> moveOrders = new java.util.HashMap<>();
+
+    /** 给某队下达持续移动指令。 */
+    public static Actor.Result order(Team team, int unitId, float tx, float ty) {
+        if (!Vars.state.isPlaying()) return err(1005, "game not in playing state");
+
+        Unit u = Groups.unit.getByID(unitId);
+        if (u == null) return err(1002, "unit id " + unitId + " not found");
+        if (u.team != team) return err(1005, "unit belongs to " + u.team.name);
+
+        String bad = checkVisible(team, u.x, u.y, px(tx), px(ty), false);
+        if (bad != null) return err(1005, bad);
+
+        // 20 秒走不到就放弃，避免单位永远被一条指令牵着
+        moveOrders.put(unitId, new MoveOrder(team, tx, ty, System.currentTimeMillis() + 20_000L));
+        return Actor.Result.ok("moving " + u.type.name + " id=" + unitId + " toward (" + (int) tx + "," + (int) ty + ")");
+    }
+
+    /** 取消某单位的移动指令。 */
+    public static Actor.Result stopOrder(Team team, int unitId) {
+        moveOrders.remove(unitId);
+        return Actor.Result.ok("stopped unit " + unitId);
+    }
+
+    /** 移动指令施加次数，用于判断主循环有没有真的在跑。 */
+    private static volatile long tickCount = 0;
+    private static volatile long lastApplyCount = 0;
+
+    public static long tickCount() { return tickCount; }
+    public static long applyCount() { return lastApplyCount; }
+
+    /**
+     * 直接设定速度并转向目标 —— 比 movePref 强硬。
+     *
+     * `movePref` 对非 omni 单位走 `rotateMove`，而它是**沿当前朝向**移动的
+     * （`Tmp.v2.trns(rotation, len)`），朝反了就往反方向走。这里同时把
+     * rotation 掰向目标，并直接覆写 vel。
+     */
+    public static Actor.Result warp(Team team, int unitId, float tx, float ty) {
+        Unit u = Groups.unit.getByID(unitId);
+        if (u == null) return err(1002, "unit id " + unitId + " not found");
+        if (u.team != team) return err(1005, "unit belongs to " + u.team.name);
+        u.x = px(tx); u.y = px(ty);
+        // 挂一个逐帧探针：主循环里发现位置变了就记下来
+        warpProbe.put(unitId, new Probe(u.x, u.y, System.currentTimeMillis() + 3000L, 0));
+        return Actor.Result.ok("warped to (" + (int) tx + "," + (int) ty
+            + "); live now world=(" + (int) u.x + "," + (int) u.y + ")"
+            + " tile=(" + (int) (u.x / 8f) + "," + (int) (u.y / 8f) + ")");
+    }
+
+    /** 逐帧位置探针：记录传送后位置被谁改回去了。 */
+    private static final class Probe {
+        final float setX, setY;
+        final long expiresAt;
+        int revertedAt = -1;
+        float revertX, revertY;
+        int framesSeen = 0;
+        Probe(float setX, float setY, long expiresAt, int framesSeen) {
+            this.setX = setX; this.setY = setY; this.expiresAt = expiresAt; this.framesSeen = framesSeen;
+        }
+    }
+    private static final java.util.Map<Integer, Probe> warpProbe = new java.util.HashMap<>();
+
+    public static String probeJson() {
+        StringBuilder sb = new StringBuilder("[");
+        boolean f = true;
+        for (var e : warpProbe.entrySet()) {
+            Probe p = e.getValue();
+            if (!f) sb.append(',');
+            f = false;
+            sb.append(new Json.Obj().put("unit", e.getKey())
+                .put("setX", p.setX).put("setY", p.setY)
+                .put("framesSeen", p.framesSeen)
+                .put("revertedAtFrame", p.revertedAt)
+                .put("revertX", p.revertX).put("revertY", p.revertY)
+                .toString());
+        }
+        return sb.append(']').toString();
+    }
+
+    /** 读某个单位的**实时**状态（不走快照）。 */
+    public static Actor.Result livePos(Team team, int unitId) {
+        Unit u = Groups.unit.getByID(unitId);
+        if (u == null) return err(1002, "unit id " + unitId + " not found");
+        return Actor.Result.ok("{\"unit\":" + unitId
+            + ",\"type\":" + Json.str(u.type.name)
+            + ",\"worldX\":" + u.x + ",\"worldY\":" + u.y
+            + ",\"tileX\":" + (int) (u.x / 8f) + ",\"tileY\":" + (int) (u.y / 8f)
+            + ",\"velX\":" + u.vel.x + ",\"velY\":" + u.vel.y
+            + ",\"rotation\":" + u.rotation
+            + ",\"added\":" + u.isAdded() + ",\"dead\":" + u.dead
+            + ",\"typePhysics\":" + u.type.physics
+            + ",\"hasPhysicsRef\":" + u.hasPhysicsRef
+            + ",\"speed\":" + u.speed()
+            + ",\"typeSpeed\":" + u.type.speed
+            + ",\"mass\":" + u.mass()
+            + ",\"hitSize\":" + u.hitSize()
+            + ",\"flying\":" + u.isFlying()
+            + ",\"dockedType\":" + Json.str(String.valueOf(u.dockedType))
+            + ",\"spawnedByCore\":" + u.spawnedByCore
+            + ",\"limitMapArea\":" + Vars.state.rules.limitMapArea
+            + ",\"limitX\":" + Vars.state.rules.limitX
+            + ",\"limitY\":" + Vars.state.rules.limitY
+            + ",\"limitW\":" + Vars.state.rules.limitWidth
+            + ",\"limitH\":" + Vars.state.rules.limitHeight
+            + ",\"teamIsAI\":" + u.team.isAI()
+            + ",\"controller\":" + Json.str(String.valueOf(u.controller()))
+            + ",\"team\":" + Json.str(u.team.name) + "}");
+    }
+
+    /** 由主循环每帧调用：把存下来的目标重新施加到单位上。 */
+    public static void tickMoveOrders() {
+        tickCount++;
+
+        // 探针：抓出传送后位置在哪一帧被改回去
+        if (!warpProbe.isEmpty()) {
+            long now = System.currentTimeMillis();
+            var pit = warpProbe.entrySet().iterator();
+            while (pit.hasNext()) {
+                var pe = pit.next();
+                Unit pu = Groups.unit.getByID(pe.getKey());
+                Probe pr = pe.getValue();
+                if (pu == null || now > pr.expiresAt) { pit.remove(); continue; }
+                pr.framesSeen++;
+                if (pr.revertedAt < 0 && (Math.abs(pu.x - pr.setX) > 0.5f || Math.abs(pu.y - pr.setY) > 0.5f)) {
+                    pr.revertedAt = pr.framesSeen;
+                    pr.revertX = pu.x;
+                    pr.revertY = pu.y;
+                }
+            }
+        }
+
+        if (moveOrders.isEmpty()) return;
+        if (Vars.state == null || !Vars.state.isPlaying()) { moveOrders.clear(); return; }
+
+        long now = System.currentTimeMillis();
+        var it = moveOrders.entrySet().iterator();
+        while (it.hasNext()) {
+            var e = it.next();
+            Unit u = Groups.unit.getByID(e.getKey());
+            MoveOrder o = e.getValue();
+
+            if (u == null || u.dead || u.team != o.team || now > o.expiresAt) { it.remove(); continue; }
+
+            float txp = px(o.tx), typ = px(o.ty);
+            float dx = txp - u.x, dy = typ - u.y;
+            float dist = (float) Math.sqrt(dx * dx + dy * dy);
+
+            // 16 像素（2 格）以内算到达
+            if (dist < 16f) { it.remove(); continue; }
+
+            // 转向目标 + 直接覆写速度。
+            //
+            // 为什么还要直接写 x/y：实测只写 vel 时位置纹丝不动 ——
+            // vel 能留住（说明 VelComp.update() 的 move() 确实调了），
+            // 但实体坐标会在**下一帧内**被恢复到原值（探针实测 revertedAtFrame=1）。
+            // 与其继续挖是谁恢复的，不如每帧重写，保证位移一定累积。
+            float ang = Mathf.angle(dx, dy);
+            u.rotation = Mathf.slerpDelta(u.rotation, ang, 0.3f);
+            float sp = Math.max(u.speed(), 0.5f);
+            u.vel.set(dx, dy).nor().scl(sp);
+
+            // 每帧朝目标推进。
+            //
+            // 实测：只写 vel 时单位几乎不动（位置每帧被恢复，45 帧只累积了 8 像素）。
+            // 所以这里每帧直接推进一个较大的步长 —— 被恢复吃掉一部分之后仍能稳定前进。
+            // 步长取 6 像素/帧（≈ 45 格/秒），够快又不至于瞬移穿透地形。
+            float step = Math.min(Math.max(sp, 6f), dist);
+            u.x += dx / dist * step;
+            u.y += dy / dist * step;
+            lastApplyCount++;
+        }
+    }
+
+    public static void clearMoveOrders() { moveOrders.clear(); }
+
+    /** 当前挂着的移动指令，供 /control?op=orders 查看。 */
+    public static String ordersJson() {
+        StringBuilder sb = new StringBuilder("[");
+        boolean f = true;
+        for (var e : moveOrders.entrySet()) {
+            Unit u = Groups.unit.getByID(e.getKey());
+            if (!f) sb.append(',');
+            f = false;
+            sb.append(new Json.Obj()
+                .put("unit", e.getKey())
+                .put("type", u == null ? "?" : u.type.name)
+                .put("targetX", e.getValue().tx)
+                .put("targetY", e.getValue().ty)
+                .put("worldX", u == null ? 0f : u.x)
+                .put("worldY", u == null ? 0f : u.y)
+                .toString());
+        }
+        return sb.append(']').toString();
     }
 
     /** 被控制的单位向目标点移动。仅在已进入单位时有效。 */
