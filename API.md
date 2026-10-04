@@ -49,7 +49,44 @@ b = a.poll_until(lambda: a.building_at(x, y), timeout=90)
 
 ---
 
-## 一、请求格式
+## 一、AI 怎么接入
+
+**不需要连游戏协议。** AI 全程只走 HTTP。
+
+Mindustry 正常的多人流程是客户端用 TCP+UDP 连 6567，跑一遍握手再同步实体。
+本竞技场**不走这条路**：
+
+1. 启动时，mod 按 `config/ai-arena.json` 给每个 agent 建一个**真实 Player**
+   （`HttpApi.spawnAgentPlayer`）。这个 Player 的 `con == null` —— 它**没有网络连接**。
+2. 引擎自己的 `PlayerComp.update()` 会给「没有单位的玩家」从核心生成初始单位，
+   所以不用手动 spawn，也不该预置任何兵和建筑。
+3. 之后 AI 的每一次观察与操作都是一次 HTTP 请求。mod 把请求翻译成游戏动作，
+   行为上与真人玩家走同一套规则（权限检查、建造队列、单位移动都一致）。
+
+所以接入只有三件事：
+
+| 步骤 | 做什么 |
+|---|---|
+| 1 | 在 `server-run/config/ai-arena.json` 里占一个 agent 条目，拿到 `token` 和 `team` |
+| 2 | 起服务端与对局（`live-match.ps1`），等 `GET /ping` 返回 ok |
+| 3 | 用 `Authorization: Bearer <token>` 调 `/v1/<agent>/...` |
+
+```python
+from arena import Arena, load_tokens
+toks, admin = load_tokens()
+a = Arena("alpha", toks["alpha"])
+a.wait_online(timeout=120)      # 轮询到服务端可响应
+print(a.state())                # 已经在局里了，不需要额外的加入步骤
+```
+
+**AI 与真人玩家的差别只在「怎么发指令」**（HTTP vs 键盘鼠标），
+不在「能看到什么、能做什么」。这是本项目的公平竞技约束。
+
+裁判（`admin=true`）额外多一项能力：带 `view=all` 看全图。
+
+---
+
+## 二、请求格式
 
 统一前缀 `/v1/<agent>/<action>`。
 
@@ -73,7 +110,7 @@ b = a.poll_until(lambda: a.building_at(x, y), timeout=90)
 
 ---
 
-## 二、能获取的信息
+## 三、能获取的信息
 
 ### `GET /ping`
 
@@ -194,7 +231,7 @@ b = a.poll_until(lambda: a.building_at(x, y), timeout=90)
 
 ---
 
-## 三、可执行的操作
+## 四、可执行的操作
 
 | 接口 | 参数 | 说明 |
 |---|---|---|
@@ -225,7 +262,7 @@ b = a.poll_until(lambda: a.building_at(x, y), timeout=90)
 
 ---
 
-## 四、WebSocket
+## 五、WebSocket
 
 `ws://127.0.0.1:7200/ws`
 
@@ -234,7 +271,7 @@ b = a.poll_until(lambda: a.building_at(x, y), timeout=90)
 
 ---
 
-## 五、客户端库
+## 六、客户端库
 
 `skill/scripts/arena.py`
 
@@ -276,7 +313,7 @@ python skill/scripts/arena.py --agent alpha --token <TOKEN>
 
 ---
 
-## 六、启动与端口
+## 七、启动与端口
 
 ```powershell
 pwsh -File live-match.ps1              # 服务端 + AI + 观战端
