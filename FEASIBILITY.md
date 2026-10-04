@@ -86,7 +86,23 @@ getDrillTime = (drillTime + 50 × hardness) / drillMultipliers
 
 ---
 
-## 四、本图可行的目标
+## 四、替代配方全部被封死
+
+引擎里确实存在更省煤的方块，但在本图上**一个都用不了**。
+
+| 方块 | 配方优势 | 封死原因 |
+|---|---|---|
+| `multi-press` | `coal 3 → graphite 2`（1.5 煤/石墨，省 25%） | `consumeLiquid(water, 0.1f)` —— **本图无任何水体** |
+| `silicon-crucible` | `coal 4 + sand 6 + pyratite 1 → silicon 8`（约 0.63 煤/硅，省一半） | 建造成本要 `plastanium 35`，而 plastanium 需**石油** —— **本图无 tar 地板** |
+| `silicon-arc-furnace` | `silicon 4` 产出 | 建造成本要 `beryllium 70` —— **Erekir 星球的资源**，Serpulo 没有 |
+
+**⇒ 只剩最基础的两个配方，煤需求 15/s 不变。**
+
+这一条也把「换配方绕开煤约束」这条路堵掉了 —— 不是没想到，是图上没有输入。
+
+---
+
+## 六、本图可行的目标
 
 | 资源 | 可达 |
 |---|---|
@@ -103,7 +119,7 @@ getDrillTime = (drillTime + 50 × hardness) / drillMultipliers
 
 ---
 
-## 五、方法论
+## 七、方法论
 
 **这次评估拖到第 17 轮才做，且连续两版出错。**
 
