@@ -2,5 +2,12 @@
 _work/
 __pycache__/
 *.pyc
-server-run/*.log
-server-run/**/*.log
+
+# 运行期产物
+server-run/
+*.log
+
+# 构建产物（源码在 mod/src、observer/src）
+mod/classes/
+observer/classes/
+*.jar
