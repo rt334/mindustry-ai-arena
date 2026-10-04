@@ -316,3 +316,53 @@ jar cf ai-observer.jar -C classes . && jar uf ai-observer.jar observer/mod.hjson
 ## 许可
 
 MIT
+
+
+---
+
+## 接口文档与 Skill
+
+- **[`API.md`](API.md)** —— 接口手册：起局、鉴权、接口表、观战端、故障速查。
+- **[`ENGINE-NOTES.md`](ENGINE-NOTES.md)** —— 引擎层说明（维护者文档）：坐标系与朝向、
+  邻近判定、三个已修复的引擎缺陷。
+- **[`skill/`](skill/)** —— 可安装的 Skill（`SKILL.md` + `scripts/`）。
+  装法：把 `skill/` 内容放到 `%USERPROFILE%\.dsh\skills\ai-arena\`。
+
+**`API.md` 与 `skill/` 刻意不含任何游戏内事实** —— 不写矿脉分布、方块参数、配方、
+地图结构。理由见下。
+
+### 公平竞技
+
+**AI 在任何时刻看到的，必须与一个真人玩家在同队时看到的完全一致。**
+
+这条不只是运行期约束，也约束文档：`SKILL.md` 是 agent 启动时就会读到的文件，
+往里塞游戏内情等于让它在开局前就拿到玩家要靠试验才能得到的答案。
+所以接口文档只说「怎么调」，不说「会看到什么」。
+
+引擎实现层的知识归 `ENGINE-NOTES.md`，那是维护者文档，不是 agent 读物。
+
+### 禁止一切等待
+
+**把「等了多久」当判据的代码一律不合格，判据必须是目标状态是否出现。**
+
+```python
+# ✗ 错
+time.sleep(30)
+
+# ✓ 对 —— 轮询 + 提前退出
+b = arena.poll_until(lambda: arena.building_at(x, y), timeout=90)
+```
+
+`Start-Sleep -Milliseconds 100` 作为**采样间隔**是允许的；
+`Start-Sleep -Seconds 30` 作为**「等它建好」**是禁止的。
+区别：前者每次醒来都检查状态、满足即退；后者把时长当判据。
+
+**为什么较真**：本项目的建造类是**排队**的，接口返回成功只代表请求入队。
+固定等待会产出「看起来成功、其实没有」的假结论。
+
+### 快速上手
+
+```powershell
+pwsh -File live-match.ps1                 # 起一局
+python skill/scripts/arena.py --agent alpha --token <TOKEN>
+```
