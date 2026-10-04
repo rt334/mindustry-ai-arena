@@ -1,13 +1,17 @@
 package aiarena;
 
+import arc.math.Mathf;
 import arc.struct.Queue;
 import mindustry.Vars;
 import mindustry.entities.units.BuildPlan;
 import mindustry.gen.Building;
 import mindustry.gen.Groups;
+import mindustry.gen.Player;
 import mindustry.gen.Unit;
+import mindustry.type.ItemStack;
 import mindustry.world.Block;
 import mindustry.world.Tile;
+import mindustry.world.blocks.ConstructBlock.ConstructBuild;
 import mindustry.game.Team;
 
 /**
@@ -34,12 +38,16 @@ public final class Actor {
         public final boolean ok;
         public final int code;
         public final String message;
+        /** 结构化附加信息（材料清单等）。null 表示没有。 */
+        public final Json.Obj extra;
 
-        private Result(boolean ok, int code, String message) {
-            this.ok = ok; this.code = code; this.message = message;
+        private Result(boolean ok, int code, String message, Json.Obj extra) {
+            this.ok = ok; this.code = code; this.message = message; this.extra = extra;
         }
-        static Result ok(String msg)      { return new Result(true, 0, msg); }
-        static Result err(int c, String m){ return new Result(false, c, m); }
+        static Result ok(String msg)                 { return new Result(true, 0, msg, null); }
+        static Result ok(String msg, Json.Obj extra) { return new Result(true, 0, msg, extra); }
+        static Result err(int c, String m)           { return new Result(false, c, m, null); }
+        static Result err(int c, String m, Json.Obj extra) { return new Result(false, c, m, extra); }
     }
 
     // ---------------------------------------------------------------- place
@@ -47,8 +55,15 @@ public final class Actor {
     /**
      * 下单放置。注意：返回成功仅代表「计划已入队」，建造实际完成需要时间
      * （受单位 buildSpeed 与移动速度约束），AI 需通过 /map 或 /state 观察结果。
+     *
+     * 响应里始终附带 materials 字段（见 materialReport）：AI 拿不到材料时
+     * 不必再靠「反复重试 + 猜」来判断原因。
      */
     public static Result place(Team team, int x, int y, String blockName, int rotation, Object config) {
+        return place(team, x, y, blockName, rotation, config, -1);
+    }
+
+    public static Result place(Team team, int x, int y, String blockName, int rotation, Object config, int unitId) {
         if (!Vars.state.isPlaying()) return Result.err(1005, "game not in playing state");
         if (Vars.world.tile(x, y) == null) return Result.err(1003, "coordinates out of bounds");
 
@@ -60,10 +75,15 @@ public final class Actor {
         Block block = resolveBlock(blockName);
         if (block == null) return Result.err(1002, "unknown block: " + blockName);
 
-        // ---- 约束 2：必须有建造单位 ----
-        Unit builder = findBuilder(team);
+        Json.Obj mat = materialReport(team, block);
+
+        // ---- 约束 2：必须有建造单位（优先用被接管的、或显式指定的那一个）----
+        Unit builder = findBuilder(team, unitId);
         if (builder == null) {
-            return Result.err(1005, "team " + team.name + " has no builder unit");
+            Json.Obj e = new Json.Obj();
+            if (mat != null) e.putRaw("materials", mat.toString());
+            return Result.err(1005, "team " + team.name + " has no builder unit"
+                              + (unitId > 0 ? " (requested id=" + unitId + ")" : ""), e);
         }
 
         // ---- 约束 3：入队，交给引擎 ----
@@ -71,11 +91,92 @@ public final class Actor {
             ? new BuildPlan(x, y, rotation, block)
             : new BuildPlan(x, y, rotation, block, config);
 
+        // 「转移建造目标」：对同一格重复下单会替换掉原有计划 ——
+        // BuilderComp.addBuild 会按 (x,y) 找到旧计划并移除，且若该格已在施工
+        // （ConstructBuild）则新计划继承其 progress。这里把「被替换掉的是谁」
+        // 以及「进度是否继承」显式报出来，否则 AI 无法区分「新建」和「改建」。
+        String previous = null;
+        float inherited = 0f;
+        Tile target = Vars.world.tile(x, y);
+        if (target != null && target.build instanceof ConstructBuild cons) {
+            previous = cons.current == null ? cons.block.name : cons.current.name;
+            inherited = cons.progress;
+        } else if (target != null && target.build != null && target.build.block != null) {
+            previous = target.build.block.name;
+        }
+        for (BuildPlan pl : builder.plans) {
+            if (pl.x == x && pl.y == y && pl.block != null) { previous = pl.block.name; break; }
+        }
+
         builder.addBuild(plan);
         Queue<BuildPlan> q = builder.plans;
-        return Result.ok("queued " + block.name + " at (" + x + "," + y
-                         + ") by " + builder.type.name + "; pending plans=" + (q == null ? 0 : q.size));
+
+        Json.Obj builderInfo = new Json.Obj()
+            .put("id", builder.id)
+            .put("type", builder.type.name);
+        Json.Obj extra = new Json.Obj()
+            .putRaw("builder", builderInfo.toString())
+            .put("pendingPlans", q == null ? 0 : q.size)
+            .put("mode", previous == null ? "new" : "transfer");
+        if (previous != null) {
+            extra.put("previousBlock", previous);
+            extra.put("inheritedProgress", inherited);
+        }
+        if (mat != null) extra.putRaw("materials", mat.toString());
+
+        String verb = previous == null
+            ? "queued "
+            : "transfer target to ";
+        return Result.ok(verb + block.name + " at (" + x + "," + y
+                         + ") by " + builder.type.name
+                         + (previous == null ? "" : " (was " + previous + ")")
+                         + "; pending plans=" + (q == null ? 0 : q.size),
+                         extra);
     }
+
+    /**
+     * 该方块的建造材料 vs 当前核心库存。
+     *
+     * 动机：/place 以前只回「queued ...」，建造迟迟不出现时 AI 无从区分
+     * 「队列忙」「位置不可建」「材料不够」——实测里这是最大的盲区之一。
+     * 引擎自身的卡住判定（BuilderComp）就是查 core.items.has(requirements)，
+     * 这里把同一份信息提前暴露出来。
+     *
+     * 返回 { adequate, requirements:[{item, need, have, ok, short}], missing:[...] }
+     * 无材料需求时返回 null。
+     */
+    public static Json.Obj materialReport(Team team, Block block) {
+        if (block == null || block.requirements == null || block.requirements.length == 0) return null;
+
+        float mult = Vars.state.rules.buildCostMultiplier;
+        Building core = team.core();
+        Json.Obj items = new Json.Obj();
+        Json.Obj arr = new Json.Obj();
+        int idx = 0;
+        boolean adequate = true;
+
+        for (ItemStack req : block.requirements) {
+            if (req == null || req.item == null) continue;
+            int need = Math.max(1, Mathf.round(req.amount * mult));
+            int have = core == null ? 0 : core.items.get(req.item);
+            boolean ok = have >= need;
+            if (!ok) adequate = false;
+            Json.Obj one = new Json.Obj()
+                .put("item", req.item.name)
+                .put("need", need)
+                .put("have", have)
+                .put("ok", ok)
+                .put("short", ok ? 0 : need - have);
+            arr.putRaw(String.valueOf(idx++), one.toString());
+        }
+
+        Json.Obj out = new Json.Obj()
+            .put("adequate", adequate)
+            .putRaw("requirements", arr.toString());
+        if (!adequate) out.put("coreCopper", core == null ? 0 : core.items.get(mindustry.content.Items.copper));
+        return out;
+    }
+
 
     // ---------------------------------------------------------------- break
 
@@ -184,6 +285,32 @@ public final class Actor {
     // ---------------------------------------------------------------- helpers
 
     private static Unit findBuilder(Team team) {
+        return findBuilder(team, -1);
+    }
+
+    /**
+     * 找执行建造的单位。选择顺序：
+     *
+     *   1) 显式指定的 unitId（如果它属于本队且 canBuild）
+     *   2) 该队当前「被接管」的单位（对应玩家的双击切换 —— /control?op=enter 之后
+     *      就应该由那一个单位来建，否则接管对建造毫无意义）
+     *   3) 否则退回「第一个 canBuild 的单位」（旧行为，保持兼容）
+     *
+     * 第 2 条是这版新增的：以前无论接管了谁，/place 都随机挑一个 canBuild 的单位，
+     * 于是「切换建造对象」这个动作在建造路径上完全不起作用。
+     */
+    private static Unit findBuilder(Team team, int unitId) {
+        if (unitId > 0) {
+            Unit u = Groups.unit.getByID(unitId);
+            if (u != null && u.isValid() && !u.dead() && u.team == team && u.canBuild()) return u;
+        }
+
+        Player shadow = Shadow.of(team);
+        if (shadow != null) {
+            Unit u = shadow.unit();
+            if (u != null && u.isValid() && !u.dead() && u.team == team && u.canBuild()) return u;
+        }
+
         for (Unit u : Groups.unit) {
             if (u != null && u.isValid() && u.team == team && u.canBuild() && !u.dead()) return u;
         }

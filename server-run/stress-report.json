@@ -1,0 +1,436 @@
+﻿[
+    {
+        "Stage":  "cover",
+        "Name":  "GET /ping",
+        "Ok":  true,
+        "Ms":  21,
+        "Note":  "{\"ok\":true,\"data\":{\"headless\":true,\"tick\":196,\"agents\":5}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /state",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"alpha\",\"team\":1,\"tick\":198,\"wave\":1,\"playing\":true,\"paused\":false,\"gameO..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /units",
+        "Ok":  true,
+        "Ms":  21,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"alpha\",\"team\":1,\"tick\":199,\"units\":[{\"id\":209,\"type\":\"poly\",\"team\":1,\"x\"..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /buildings",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"alpha\",\"team\":1,\"tick\":201,\"buildings\":[{\"x\":61,\"y\":104,\"team\":1,\"block\"..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /map 区域模式",
+        "Ok":  true,
+        "Ms":  33,
+        "Note":  "{\"ok\":true,\"data\":{\"x\":55,\"y\":98,\"w\":8,\"h\":8,\"agent\":\"alpha\",\"worldW\":350,\"worldH\":200,\"tiles\":[{\"x\"..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /map 全图模式",
+        "Ok":  true,
+        "Ms":  45,
+        "Note":  "{\"ok\":true,\"data\":{\"x\":0,\"y\":0,\"w\":4096,\"h\":1,\"agent\":\"alpha\",\"worldW\":350,\"worldH\":200,\"tiles\":[{\"x..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /content",
+        "Ok":  true,
+        "Ms":  38,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"alpha\",\"blocks\":[{\"name\":\"graphite-press\",\"size\":2,\"health\":160,\"categor..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /intel",
+        "Ok":  true,
+        "Ms":  21,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"alpha\",\"team\":\"sharded\",\"tick\":212,\"confirmTicks\":600,\"toleranceTicks\":3..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /events",
+        "Ok":  true,
+        "Ms":  21,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"alpha\",\"tick\":213,\"since\":0,\"nextSince\":4,\"count\":0,\"buffered\":4,\"events..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /observe",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"alpha\",\"isReferee\":false,\"currentView\":\"sharded\",\"canSeeAll\":false,\"team..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /queue",
+        "Ok":  true,
+        "Ms":  22,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"alpha\",\"team\":\"sharded\",\"builders\":[{\"unit\":209,\"type\":\"poly\",\"plans\":0}..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /maps (裁判)",
+        "Ok":  true,
+        "Ms":  37,
+        "Note":  "{\"ok\":true,\"data\":{\"total\":18,\"pvpCapable\":0,\"maps\":[{\"name\":\"Ancient Caldera\",\"w\":256,\"h\":256,\"team..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "GET /record (裁判)",
+        "Ok":  true,
+        "Ms":  21,
+        "Note":  "{\"ok\":true,\"data\":{\"recording\":false,\"status\":\"not recording\",\"files\":[{\"name\":\"20261003-152736-vein..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /place 单点",
+        "Ok":  true,
+        "Ms":  30,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"queued conveyor at (61,105) by poly; pending plans=1\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /place shape=line",
+        "Ok":  true,
+        "Ms":  33,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"batch requested=5 accepted=5 skipped[invisible=0,invalid=0,noUnit=0]\",..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /place shape=area",
+        "Ok":  true,
+        "Ms":  26,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"batch requested=9 accepted=9 skipped[invisible=0,invalid=0,noUnit=0]\",..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /place shape=circle",
+        "Ok":  true,
+        "Ms":  33,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"batch requested=13 accepted=13 skipped[invisible=0,invalid=0,noUnit=0]..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /place shape=outline",
+        "Ok":  true,
+        "Ms":  31,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"batch requested=16 accepted=16 skipped[invisible=0,invalid=0,noUnit=0]..."
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /break",
+        "Ok":  true,
+        "Ms":  36,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"queued break of core-nucleus at (61,105)\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /config",
+        "Ok":  true,
+        "Ms":  33,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"configured core-nucleus at (61,104)\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /spawn",
+        "Ok":  true,
+        "Ms":  30,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"spawned mono id=261 at tile(61,104) pop=2/24\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /chat",
+        "Ok":  true,
+        "Ms":  32,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"sent: stress-test\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /command move",
+        "Ok":  true,
+        "Ms":  32,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"commanded 1 unit(s) to position\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /command setStance",
+        "Ok":  true,
+        "Ms":  32,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"set stance holdfire=true on 1 unit(s)\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /command setCommand",
+        "Ok":  true,
+        "Ms":  33,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"set command mine on 1 unit(s)\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /control enter",
+        "Ok":  true,
+        "Ms":  30,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"controlling poly id=209\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /control fire",
+        "Ok":  true,
+        "Ms":  32,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"aiming at (63,107) shooting=true\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /control release",
+        "Ok":  true,
+        "Ms":  31,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"released control\"}}"
+    },
+    {
+        "Stage":  "cover",
+        "Name":  "POST /queue?clear",
+        "Ok":  true,
+        "Ms":  33,
+        "Note":  "{\"ok\":true,\"data\":{\"message\":\"cleared 0 pending plan(s)\"}}"
+    },
+    {
+        "Stage":  "concurrent",
+        "Name":  "并发读 16 线程 x 30",
+        "Ok":  true,
+        "Ms":  1,
+        "Note":  "total=480 ok=480 bad=0 p95=1ms"
+    },
+    {
+        "Stage":  "write",
+        "Name":  "20x 批量建造 (3x3)",
+        "Ok":  true,
+        "Ms":  0,
+        "Note":  "ok=20 fail=0"
+    },
+    {
+        "Stage":  "write",
+        "Name":  "30x spawn (含人口上限)",
+        "Ok":  true,
+        "Ms":  0,
+        "Note":  "ok=21 cap=9"
+    },
+    {
+        "Stage":  "write",
+        "Name":  "20x 多单位指挥",
+        "Ok":  true,
+        "Ms":  0,
+        "Note":  "ok=20 fail=0"
+    },
+    {
+        "Stage":  "write",
+        "Name":  "15x 事件轮询",
+        "Ok":  true,
+        "Ms":  0,
+        "Note":  "events=100 since=240"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "越界坐标",
+        "Ok":  true,
+        "Ms":  31,
+        "Note":  "{\"ok\":false,\"code\":1003,\"error\":\"coordinates out of bounds\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "负坐标",
+        "Ok":  true,
+        "Ms":  44,
+        "Note":  "{\"ok\":false,\"code\":1003,\"error\":\"coordinates out of bounds\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "视野外建造",
+        "Ok":  true,
+        "Ms":  35,
+        "Note":  "{\"ok\":false,\"code\":1005,\"error\":\"target tile is not visible to team sharded\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "视野外指挥",
+        "Ok":  true,
+        "Ms":  33,
+        "Note":  "{\"ok\":false,\"code\":1005,\"error\":\"target at tile(5,5) is not visible to sharded\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "未知方块",
+        "Ok":  true,
+        "Ms":  30,
+        "Note":  "{\"ok\":false,\"code\":1002,\"error\":\"unknown block: not-a-block\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "未知 shape",
+        "Ok":  true,
+        "Ms":  19,
+        "Note":  "{\"ok\":false,\"code\":1001,\"error\":\"unknown shape: nonsense (point|line|rect|area|outline|circle)\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "未知单位类型",
+        "Ok":  true,
+        "Ms":  28,
+        "Note":  "{\"ok\":false,\"code\":1002,\"error\":\"unknown unit type: nonsense\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "未知 command",
+        "Ok":  true,
+        "Ms":  45,
+        "Note":  "{\"ok\":false,\"code\":1001,\"error\":\"unknown action: nonsense\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "未知 control op",
+        "Ok":  true,
+        "Ms":  35,
+        "Note":  "{\"ok\":false,\"code\":1001,\"error\":\"unknown op: nonsense\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "未知 stance",
+        "Ok":  true,
+        "Ms":  32,
+        "Note":  "{\"ok\":false,\"code\":1002,\"error\":\"unknown unit stance: nonsense\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "缺少必填参数",
+        "Ok":  true,
+        "Ms":  31,
+        "Note":  "{\"ok\":false,\"code\":1001,\"error\":\"required: block\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "空 units 列表",
+        "Ok":  true,
+        "Ms":  33,
+        "Note":  "{\"ok\":false,\"code\":1002,\"error\":\"no valid units for sharded\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "未知 action",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "{\"ok\":false,\"code\":1002,\"error\":\"unknown action: nonsense\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "批量超限 (900 格)",
+        "Ok":  true,
+        "Ms":  42,
+        "Note":  "{\"ok\":false,\"code\":1004,\"error\":\"batch too large: 900 tiles, max 200\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "map 区域超限",
+        "Ok":  true,
+        "Ms":  21,
+        "Note":  "{\"ok\":false,\"code\":1004,\"error\":\"region too large: 40000 tiles, max 4096 — use /map?cursor= for whol..."
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "map 负数尺寸",
+        "Ok":  true,
+        "Ms":  19,
+        "Note":  "{\"ok\":false,\"code\":1001,\"error\":\"w and h must be positive\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "无 token",
+        "Ok":  true,
+        "Ms":  19,
+        "Note":  "{\"ok\":false,\"code\":1401,\"error\":\"missing or invalid Authorization: Bearer \u003ctoken\u003e\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "错误 token",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "{\"ok\":false,\"code\":1401,\"error\":\"missing or invalid Authorization: Bearer \u003ctoken\u003e\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "跨 agent 访问",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "{\"ok\":false,\"code\":1403,\"error\":\"token does not belong to agent \u0027referee\u0027\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "非 admin 调 setup",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "{\"ok\":false,\"code\":1403,\"error\":\"setup requires an admin token\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "非 admin 调 record",
+        "Ok":  true,
+        "Ms":  19,
+        "Note":  "{\"ok\":false,\"code\":1403,\"error\":\"record control requires an admin token\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "view=all 静默降级",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "view=sharded"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "裁判 view=all",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"referee\",\"team\":0,\"tick\":467,\"wave\":1,\"playing\":true,\"paused\":false,\"gam..."
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "裁判 view=2",
+        "Ok":  true,
+        "Ms":  19,
+        "Note":  "{\"ok\":true,\"data\":{\"agent\":\"referee\",\"team\":2,\"tick\":468,\"buildings\":[{\"x\":289,\"y\":104,\"team\":2,\"blo..."
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "录像路径穿越",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "{\"ok\":false,\"code\":1001,\"error\":\"invalid recording name\"}"
+    },
+    {
+        "Stage":  "edge",
+        "Name":  "事件游标正常",
+        "Ok":  true,
+        "Ms":  20,
+        "Note":  "HTTP 200"
+    },
+    {
+        "Stage":  "stability",
+        "Name":  "25 秒持续轮询",
+        "Ok":  true,
+        "Ms":  0,
+        "Note":  "ok=398 bad=0 mem=163-\u003e199MB tick+1491"
+    },
+    {
+        "Stage":  "stability",
+        "Name":  "日志无异常",
+        "Ok":  true,
+        "Ms":  0,
+        "Note":  "clean"
+    }
+]

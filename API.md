@@ -235,7 +235,7 @@ print(a.state())                # 已经在局里了，不需要额外的加入�
 
 | 接口 | 参数 | 说明 |
 |---|---|---|
-| `POST /place` | `x` `y` `block` [`rot`] | 下建造请求 |
+| `POST /place` | `x` `y` `block` [`rot`] [`unit`] [`config`] | 下建造请求（见下方说明） |
 | `POST /break` | `x` `y` | 拆除 |
 | `POST /config` | `x` `y` … | 设置方块配置 |
 | `POST /control` | `op=` … | 单位操控。`op` 取值：`pos` `order` `warp` `enter` `release` `fire` `stopmove` `orders` |
@@ -244,7 +244,66 @@ print(a.state())                # 已经在局里了，不需要额外的加入�
 | `POST /chat` | `text` | 发言 |
 | `POST /admin` | `action=` … | 管理操作（仅 admin） |
 
-`rot` 取值 0~3。各 `block` 的参数（尺寸、配方）由 `/content` 在运行时提供。
+`rot` 取值 0~3（`0=东 1=南 2=西 3=北`）。各 `block` 的参数（尺寸、配方）由 `/content` 在运行时提供。
+
+### `/place` 响应：材料清单
+
+**每次 `/place` 都会返回 `materials`：这个方块要什么、你现在有多少、还缺多少。**
+不必再靠「反复重试然后猜为什么建不出来」。
+
+```json
+{"ok":true,"data":{
+  "mode":"new",
+  "builder":{"id":219,"type":"gamma"},
+  "pendingPlans":1,
+  "materials":{
+    "adequate":false,
+    "requirements":{
+      "0":{"item":"copper",  "need":35,"have":499,"ok":true, "short":0},
+      "1":{"item":"graphite","need":30,"have":0,  "ok":false,"short":30},
+      "2":{"item":"titanium","need":20,"have":0,  "ok":false,"short":20},
+      "3":{"item":"silicon", "need":30,"have":0,  "ok":false,"short":30}
+    }
+  },
+  "message":"queued laser-drill at (283,110) by gamma; pending plans=1"
+}}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `materials.adequate` | **材料是否全够**。`false` ⇒ 这计划会一直卡着不动，别等它 |
+| `requirements[].need` | 需要多少 |
+| `requirements[].have` | **核心现有多少** |
+| `requirements[].ok` | 该项是否够 |
+| `requirements[].short` | **还差多少**（够则为 0） |
+
+**`adequate=false` 时不要重试** —— 重试不会让材料变多。去看哪些 `ok=false`，先补那些物品的生产。
+
+**另注**：`ok:true` 只代表**请求已入队**，不代表建造完成；材料够 + 建造单位走到位置之后才会真正开工。
+
+### `/place` 的 `mode`：转移建造目标
+
+**对同一格重复 `/place` 换一种方块，会「转移」该格的建造目标** —— 旧计划被替换；
+若那格**已在施工中**，新计划**继承已有进度**。等价于玩家对建造中的方块改目标。
+
+```json
+{"mode":"transfer","previousBlock":"conveyor","inheritedProgress":0.0}
+```
+
+| `mode` | 含义 |
+|---|---|
+| `new` | 该格原本无计划/建筑，属新建 |
+| `transfer` | 该格原本有计划或半成品，**已被替换**；`previousBlock` 是原目标 |
+
+**铺错不用先 `/break`**，对同格再 `/place` 一次即可，进度不浪费。
+`/buildings` 里名字以 `build` 开头的（`build1`/`build2`）就是**施工中的格子**，
+对这些格子重新 `/place` 即为转移目标。
+
+### `/place` 的 `unit` 参数
+
+默认由**当前接管的单位**执行（`/control?op=enter&unit=<id>` 之后就是它），没有则任选一个可建造单位。
+传 `unit=<id>` 可显式指定。响应里的 `builder` 字段回显实际用了谁。
+
 
 ### admin 专属
 

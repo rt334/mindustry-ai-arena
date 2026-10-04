@@ -434,10 +434,12 @@ public final class HttpApi {
                 respond(ex, 400, Json.error(1001, "required: x, y (or shape=...)"));
                 return;
             }
+            int unitId = p.getInt("unit", -1);
             postToGame(ex, () -> {
-                Actor.Result r = Actor.place(team, x, y, block, rot, config);
-                return r.ok ? Json.ok(new Json.Obj().put("message", r.message).toString())
-                            : Json.error(r.code, r.message);
+                Actor.Result r = Actor.place(team, x, y, block, rot, config, unitId);
+                Json.Obj body = (r.extra == null) ? new Json.Obj() : r.extra;
+                body.put("message", r.message);
+                return r.ok ? Json.ok(body.toString()) : Json.error(r.code, r.message, body);
             });
             return;
         }

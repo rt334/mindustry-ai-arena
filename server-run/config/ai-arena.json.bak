@@ -1,0 +1,10 @@
+{
+  "bind": "127.0.0.1",
+  "port": 7199,
+  "rateLimit": { "perSecond": 60, "burst": 200 },
+  "agents": [
+    { "id": "alpha", "team": 100, "token": "72d17a532ac7296c7f9eaddb2718c133a3d7e724862f006f", "admin": false },
+    { "id": "beta",  "team": 101, "token": "0c49e2e376eb497cf70776345f88dd2e3f7638f648e8e1aa", "admin": false },
+    { "id": "referee", "team": 0, "token": "0dfdae3b5fbdbbc13976591ec467c9d44e957c6e6bd676da", "admin": true }
+  ]
+}

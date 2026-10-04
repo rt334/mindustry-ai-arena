@@ -83,4 +83,15 @@ public final class Json {
     public static String error(int code, String message) {
         return new Obj().put("ok", false).put("code", code).put("error", message).toString();
     }
+
+    /**
+     * 失败信封 + 结构化附加信息。
+     * extra 必须是**已序列化的 JSON 片段**（Obj.toString()），会被原样嵌入 data。
+     * 用于「失败原因之外还带了可诊断数据」的场景，例如材料清单。
+     */
+    public static String error(int code, String message, Obj extra) {
+        Obj o = new Obj().put("ok", false).put("code", code).put("error", message);
+        if (extra != null) o.putRaw("data", extra.toString());
+        return o.toString();
+    }
 }
