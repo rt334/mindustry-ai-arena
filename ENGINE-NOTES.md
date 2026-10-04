@@ -356,7 +356,50 @@ public boolean acceptItem(Building source, Item item){
 
 ---
 
-## 十四、三条工程纪律（本项目反复踩到）
+## 十四、两种「计划不下地」，症状都是 `/place` 返回 ok
+
+`/place` 成功**只代表请求入队**。计划不下地有两类原因，症状相似但诊断路径完全不同。
+
+**第一类：矿机挖不动那种矿。**
+
+`mechanical-drill` 是 **tier 2**，只能挖 `hardness <= 2`：
+
+```
+sand 0  copper 1  lead 1  coal 2   ← 挖得动
+titanium 3  thorium 4  tungsten 5  ← 挖不动
+```
+
+把它放在钛上，`validPlace` 永远不通过，计划永远排队。**`/queue` 里的 `plans` 也不涨**
+（因为根本没进建造队列）—— 这一条很误导，看起来像「请求丢了」。
+
+钛要用 `pneumatic-drill`（tier 3）或 `laser-drill`（tier 4，size 3）。
+
+**⚠ 选矿机前必须按硬度查 tier。** 实测在钛上连下 5 次 `mechanical-drill`，
+每次都返回 `queued ... OK`，每次都读回来一台没有 —— 白烧了五轮。
+
+**第二类：材料不够。**
+
+`hasAll(plan)` 不通过。特征与第一类**相反**：
+
+```
+/queue -> builders[0].plans 越积越多（4、5、6…）
+核心库存里缺某种料
+```
+
+实测：4 台 `pneumatic-drill` 挂着 `plans=4` 一动不动，
+因为核心的 `graphite` 是 0 —— 而 `pneumatic-drill` 正需要石墨。
+
+**判据一句话**：
+
+| 现象 | 原因 |
+|---|---|
+| `/place` ok，读回没有，`plans` **不涨** | **矿机 tier 不够**（挖不动那种矿） |
+| `/place` ok，读回没有，`plans` **持续累积** | **材料不足**（`hasAll` 不过） |
+| `plans` 累积且**长时间不降** | 建造单位到不了工地（射程 / 被挡） |
+
+**顺带记一个工具缺陷**：mod 的 `GET /block?name=...` 返回的 `requirements`
+序列化坏了（每项都是 `x`，读不出物品与数量）。**要查配方不能靠这个接口** ——
+得从方块表或实测反推。
 
 **一、改语义宽泛的判定函数前，先列出所有调用点。**
 `isLocal()` / `isRemote()` / `isVisible()` 这类函数在不同位置可能承载**相反**的语义。
@@ -386,12 +429,27 @@ for(Player p : Groups.player){
 `viewTeamFor` 走 `NetServer.viewTeamProvider` 这个回调。**它是一个可选注入点，
 不注册就返回 null** —— 于是任何「观战者绑定到某个真实队伍」的用法都会
 静默掉进 `continue`，收不到任何快照。
+## 十五、三条工程纪律（本项目反复踩到）
+
+**一、改语义宽泛的判定函数前，先列出所有调用点。**
+`isLocal()` / `isRemote()` / `isVisible()` 这类函数在不同位置可能承载**相反**的语义。
+本项目在 `isLocal()` 上踩过：为修「单位不移动」而改成全局 true，结果打断
+`NetServer.sync()` 的玩家过滤，服务端一个快照都不发（见 6.1）。
+
+**二、先证明上限，再下结论。**
+用受限视野扫出来的数字会安静地偏低，看起来完全合理。评估容量前先确认覆盖比例。
+
+**三、一次只改一个变量。**
+铺一片再测，出问题无法归因；测出的差异也不知道是哪一处造成的。
+
+---
+
 
 要支持「以某队视角观战」，必须注册该回调。
 
 ---
 
-## 十五、网络
+## 十六、网络
 
 - 客户端 JVM **必须**带 `-Djava.net.preferIPv4Stack=true`。
   不带的话 UDP 可能绑到 IPv6，服务端按 IPv4 发的快照永远收不到。
