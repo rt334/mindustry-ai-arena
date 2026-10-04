@@ -82,7 +82,7 @@ GET /v1/{agent}/events?since=<seq>&limit=<n>
 
 ### 3.2 事件来源：引擎监听 + 差分补齐
 
-**引擎监听**（9 类）：
+**引擎监听**（11 类）：
 
 | 事件 | 字段 |
 |---|---|
@@ -90,11 +90,16 @@ GET /v1/{agent}/events?since=<seq>&limit=<n>
 | `UnitDestroyEvent` | unit, type |
 | `BlockBuildEndEvent` | x, y, block, byUnit, breaking |
 | `BlockDestroyEvent` | x, y, block |
+| `TileChangeEvent` | x, y, block |
+| `BuildDamageEvent` | x, y, health |
 | `ConfigEvent` | block, value |
 | `CoreChangeEvent` | block（并清空该队 intel） |
 | `WaveEvent` | wave |
 | `GameOverEvent` | winner |
 | `WorldLoadEvent` | 触发 `clear()` |
+
+> 后两类是本文 §6 补记的：**它们的实例会被引擎复用**，监听器里必须立刻把字段抄出来，
+> 不能缓存事件引用。早期这张表只写了 9 类，漏了它们。
 
 **差分补齐**（4 类）：`unitAppear` / `unitGone` / `buildAppear` / `buildGone`
 

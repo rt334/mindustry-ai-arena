@@ -73,9 +73,13 @@ getDrillTime = (drillTime + 50 × hardness) / drillMultipliers
 
 | 矿机 | tier | drillTime | size | 水加成 |
 |---|---|---|---|---|
-| `mechanical-drill` | 2 | 600 | 2×2 | 无 |
+| `mechanical-drill` | 2 | 600 | 2×2 | 有 |
 | `pneumatic-drill` | 3 | 400 | 2×2 | 有 |
 | `laser-drill` | 4 | 280 | 3×3 | 有 |
+
+**三种矿机都带 `.consumeLiquid(Liquids.water, …).boost()`**
+（`mechanical 0.05` / `pneumatic 3.5/60` / `laser 0.08`），`liquidBoostIntensity = 1.6`。
+早先这张表把 mechanical 标成「无」是错的，**但对下面的结论无影响**。
 
 **本图无水**（全图 70000 格只有 `darksand / shale / moss / spore-moss / core-zone`），
 故 `speed = 1`。上表按裸速算 —— **对结论无影响，余量本就有 5 倍。**

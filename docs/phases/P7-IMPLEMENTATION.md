@@ -155,7 +155,7 @@ Jval root = Jval.read(raw);
 
 ## 6. 全项目收尾
 
-至此 P0–P7 全部完成：
+至此 P0–P7 **服务器侧**全部完成（客户端两项另计，见下表状态列）：
 
 | 阶段 | 内容 | 报告 |
 |---|---|---|
@@ -164,26 +164,37 @@ Jval root = Jval.read(raw);
 | P2 | 对等约束（11 条 + 指挥范围） | `P2-IMPLEMENTATION.md` |
 | P3 | 信息 API（含事件流） | `P3-IMPLEMENTATION.md` |
 | P4 | 操作 API（批量 + spawn + chat） | `P4-IMPLEMENTATION.md` |
-| P5 | 观战与裁判（view + 客户端 Mod） | `P5-IMPLEMENTATION.md` |
-| P6 | 录像（JSONL Recorder） | 见本文件第 7 节 |
+| P5 | 观战与裁判（view + 客户端 Mod） | `P5-IMPLEMENTATION.md` —— 服务器侧实测；**客户端 Mod 只做了编译 + 结构核对，图形未实测** |
+| P6 | 录像（JSONL Recorder） | 见本文件第 7 节 —— 服务器侧就绪；**客户端图形回放未实现** |
 | P7 | 编排与场景（启动脚本） | 本文件 |
 
 ### 最终产物
 
 ```
 C:\dsh\ai-arena\
-  ../DESIGN.md               设计文档（含 9 项引擎发现）
-  P0-VERIFICATION.md         P0 报告
-  P1-IMPLEMENTATION.md       P1 报告
-  P2-IMPLEMENTATION.md       P2 报告
-  P3-IMPLEMENTATION.md       P3 报告
-  P4-IMPLEMENTATION.md       P4 报告
-  P5-IMPLEMENTATION.md       P5 报告
-  P7-IMPLEMENTATION.md       本文件（含 P6 摘要）
-
+  README.md                  项目入口
   start-arena.ps1            编排脚本
 
-  mod\                       服务器 Mod（18 个端点）
+  docs\                      项目文档
+    README.md                文档索引
+    DESIGN.md                设计文档（含全部引擎发现）
+    API.md                   接口手册
+    ENGINE-NOTES.md          引擎层说明（维护者文档）
+    FEASIBILITY.md           目标可行性
+    STRESS-TEST.md           压力测试报告
+    PROMPTS.md               提示词约定
+    phases\                  P0~P7 分阶段报告
+      P0-VERIFICATION.md     P0 报告
+      P1-IMPLEMENTATION.md   P1 报告
+      P2-IMPLEMENTATION.md   P2 报告
+      P3-IMPLEMENTATION.md   P3 报告
+      P4-IMPLEMENTATION.md   P4 报告
+      P5-IMPLEMENTATION.md   P5 报告
+      P7-IMPLEMENTATION.md   本文件（含 P6 摘要）
+    reviews\                 产线攻坚复盘
+      REPORT.md  DEBUG-LOG.md  FEATURE-REQUESTS.md  REVIEW-ADDENDUM.md
+
+  mod\                       服务器 Mod（33 个端点）
     mod.hjson
     ai-arena.jar             77,785 B
     src\aiarena\
@@ -207,23 +218,45 @@ C:\dsh\ai-arena\
   server-run\                服务器运行目录
 ```
 
-### 端点总表（18 个）
+### 端点总表（33 个）
+
+> 早期版本这里标题写「18 个」而表里列了 20 条。以 `HttpApi.java` 的路由 `switch` 为准，
+> 实际是 33 个。逐条参数见 [API.md](../API.md)。
 
 ```
-GET  /ping                                  存活探测（无鉴权）
+读（GET，Bearer token）
 GET  /state                                 局面快照
-GET  /units  /buildings                     视野内的实体
+GET  /units  /buildings  /block             实体、单格
 GET  /map?x=&y=&w=&h=  /  ?cursor=          区域 / 全图分页
+GET  /ore                                   矿脉统计
 GET  /content                               方块/物品/单位/液体/指令/姿态目录
+GET  /rates?window=                         产率
+GET  /stalls                                产线异常警报
+GET  /drill  /factory                       矿机 / 单位工厂明细
 GET  /intel                                 核心数据情报
-GET  /events?since=                          事件流
+GET  /events?since=                         事件流
 GET  /observe                               观战信息
 GET  /queue                                 建造队列
+GET  /database                              汇总数据库
+GET  /maps                                  地图列表
+
+写（POST）
 POST /place  /break                         单点 + 批量形状
-POST /config  /spawn  /chat                 配置 / 生成 / 发言
+POST /config                                设置方块配置
+POST /mine                                  指定挖掘
 POST /command?action=                       8 种指挥操作
 POST /control?op=                           接管单位与直接操纵
-GET  /setup  /maps  /record  (仅裁判)        初始化 / 地图列表 / 录像
+POST /spawn                                 生成单位（**默认禁用**，见 API.md）
+POST /chat                                  发言
+
+裁判（admin = true）
+GET  /diag                                  服务端诊断
+GET+POST /observe  /record  /fog            视角 / 录像 / 迷雾
+POST /setup  /host  /start                  初始化 / 开游戏端口 / 解除暂停
+POST /admin                                 在线玩家管理
+
+无鉴权
+GET  /ping                                  存活探测
 ```
 
 ---

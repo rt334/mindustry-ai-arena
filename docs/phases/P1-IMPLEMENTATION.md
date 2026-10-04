@@ -156,10 +156,17 @@ coreShard = new CoreBlock("core-shard"){{
 `coreZoneOnly` 使 `Block.isHidden()` 返回 true（尽管 `unlockedNow()==true`），导致：
 
 ```
-isHidden()=true → isVisible()=false → isPlaceable()=false → validPlace() 一律 false
+isHidden()=true → isVisible()=false → isPlaceable()=false → validPlace() 失败
 ```
 
-**核心只能建在地图的 spawn 点附近。** 竞品方案：setup 作为管理员操作，直接检查「size×size 全为空地」后用 `tile.setBlock()` 放置，绕过 `validPlace`。
+**「一律」有前提，这里早期漏写了。** §5.1 ② 找到了正规出口：
+`isHidden()` 的定义是 `!buildVisibility.visible() && !state.rules.revealedBlocks.contains(this)`
+（P1 §5.1 引的源码），所以把核心加进 `rules.revealedBlocks` 就能让 `isHidden()` 变回 false；
+有 `core-zone` 地板的图上 `buildVisibility.visible()` 本来也为真，`validPlace` 正常放行。
+§5.2 的自建核心路径（`findCoreSpot + layCoreZone + validPlace`）已在 P7 §3 实测成功。
+
+**结论**：这一条只在「既无 core-zone 地板、也没配 `revealedBlocks`」时成立 ——
+那种情况下核心确实无处可放。竞品方案（直接 `tile.setBlock()` 绕过 `validPlace`）不是必需的。
 
 ### 4.4 `Rules.isBanned` 的陷阱
 
