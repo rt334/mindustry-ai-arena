@@ -184,6 +184,26 @@ public final class Actor {
             extra.put("inheritedProgress", inherited);
         }
         if (mat != null) extra.putRaw("materials", mat.toString());
+
+        // 施工时长（不含走过去的时间）。公式照抄引擎：
+        //   BuilderComp.java:246  每帧增量 = type.buildSpeed * buildSpeedMultiplier
+        //                                    * rules.buildSpeed(team) / entity.buildCost
+        //   ConstructBlock.java:451  entity.buildCost = block.buildTime * rules.buildCostMultiplier
+        // 所以 seconds = buildCost / (speed * 60)。
+        // 这是**规则**：方块属性 + 单位速度，玩家看着进度条也能感知快慢。
+        try {
+            float buildCost = block.buildTime * Vars.state.rules.buildCostMultiplier;
+            float speed = builder.type.buildSpeed;
+            try { speed *= Vars.state.rules.buildSpeed(team); } catch (Throwable ignored) { }
+            if (buildCost > 0f && speed > 0f) {
+                extra.putRaw("buildTime", new Json.Obj()
+                    .put("seconds", Math.round(buildCost / (speed * 60f) * 100f) / 100f)
+                    .put("buildCost", Math.round(buildCost * 100f) / 100f)
+                    .put("builderSpeed", Math.round(speed * 100f) / 100f)
+                    .toString());
+            }
+        } catch (Throwable ignored) { }
+
         if (resolvedConfig != null) extra.put("config", describeConfig(resolvedConfig));
         if (configWarning != null) extra.put("configWarning", configWarning);
 

@@ -61,6 +61,8 @@ public final class StallWatch {
         lastSnapshot = "[]";
         planProgress.clear();
         planStuckSince.clear();
+        planSample.clear();
+        planRate.clear();
         unitPos.clear();
     }
 
@@ -72,6 +74,18 @@ public final class StallWatch {
     private static final Map<String, Long> planStuckSince = new HashMap<>();
     /** unitId -> [x, y]，判断建造单位自己有没有在动。 */
     private static final Map<Integer, float[]> unitPos = new HashMap<>();
+    /**
+     * key -> [progress, millis]，**配套**保存上一次算速率的采样点。
+     *
+     * 必须成对：进度取一帧前的、时刻取 100ms 前的，速率就会差好几个数量级
+     * （实测差 6 倍 —— 因为 100ms 里有 6 帧）。
+     *
+     * 存 double 不是 float：毫秒时间戳约 1.7e12，而 float 只有 24 位尾数
+     * （约 7 位十进制），存进去会被舍到 65536 的倍数，dt 直接算废。
+     */
+    private static final Map<String, double[]> planSample = new HashMap<>();
+    /** key -> 实测进度变化率（进度/秒，>0 表示在推进）。 */
+    private static final Map<String, Float> planRate = new HashMap<>();
 
     /**
      * 跟踪建造计划有没有卡住。
@@ -118,6 +132,24 @@ public final class StallWatch {
                 // 单位在走动就一律重置计时：进度为 0 是「还没开工」，不是停滞
                 Float prev = planProgress.get(key);
                 boolean progressed = prev != null && Math.abs(prev - prog) > 1e-4f;
+
+                // 顺带算进度变化率 —— 同样是两次采样的差，不额外增加观测成本。
+                // 这是「盯着进度条看它涨多快」，真人抬眼就能做。
+                //
+                // 采样点必须成对取：进度和时刻来自同一次记录，否则分子分母错配。
+                double[] s = planSample.get(key);
+                if (s != null) {
+                    long dt = now - (long) s[1];
+                    if (dt >= 100L) {          // 太短噪声大，太长又跟不上快方块
+                        float r = (float) ((prog - s[0]) / (dt / 1000.0));
+                        if (r > 1e-5f) planRate.put(key, r);
+                        else planRate.remove(key);
+                        planSample.put(key, new double[]{prog, now});
+                    }
+                } else {
+                    planSample.put(key, new double[]{prog, now});
+                }
+
                 planProgress.put(key, prog);
 
                 if (moved || progressed) {
@@ -131,6 +163,8 @@ public final class StallWatch {
         // 计划消失（建完了、被替换了、被清了）就丢掉
         planProgress.keySet().removeIf(k -> !seen.contains(k));
         planStuckSince.keySet().removeIf(k -> !seen.contains(k));
+        planSample.keySet().removeIf(k -> !seen.contains(k));
+        planRate.keySet().removeIf(k -> !seen.contains(k));
         unitPos.keySet().removeIf(id -> !aliveUnits.contains(id));
     }
 
@@ -138,6 +172,23 @@ public final class StallWatch {
     public static long planStuckMillis(int unitId, int x, int y) {
         Long since = planStuckSince.get(unitId + "@" + x + "," + y);
         return since == null ? 0L : System.currentTimeMillis() - since;
+    }
+
+    /** 实测进度变化率（进度/秒）；没在推进返回 0。 */
+    public static float planRate(int unitId, int x, int y) {
+        return planRate.getOrDefault(unitId + "@" + x + "," + y, 0f);
+    }
+
+    /**
+     * 按当前实测速率外推的剩余秒数。
+     *
+     * **这是从进度条推出来的，不是引擎给的** —— 进度在涨就线性外推；
+     * 没在涨就返回 -1，此时该看 stuckSeconds，而不是瞎估一个数。
+     */
+    public static float planEtaSeconds(int unitId, int x, int y, float progress) {
+        float r = planRate(unitId, x, y);
+        if (r <= 1e-5f) return -1f;
+        return Math.max(0f, (1f - progress) / r);
     }
 
     /**

@@ -446,12 +446,23 @@ public final class Operations {
                         .put("breaking", plan.breaking);
                     if (plan.block != null) po.put("block", plan.block.name);
                     // 只有已在施工的格子才有进度：0 且长时间不涨 = 卡住
+                    float prog = 0f;
                     mindustry.gen.Building tb = Vars.world.build(plan.x, plan.y);
                     if (tb instanceof mindustry.world.blocks.ConstructBlock.ConstructBuild cb) {
-                        po.put("constructing", true).put("progress", cb.progress);
+                        prog = cb.progress;
+                        po.put("constructing", true).put("progress", prog);
                     }
                     // 进度连续不动 = 卡住。超过 3 秒才报，免得把正常的启动间隔
                     // 当成异常。真人是靠「单位站着不动、方块不出现」看出来的。
+                    // 建造还要多久：按实测进度变化率外推。进度条在动，
+                    // 真人盯着就能估出来 —— 这里只是把这件肉眼可做的事自动化。
+                    float rate = StallWatch.planRate(u.id, plan.x, plan.y);
+                    if (rate > 1e-5f) {
+                        po.put("progressRate", Math.round(rate * 1000f) / 1000f);
+                        po.put("etaSeconds",
+                            Math.round(StallWatch.planEtaSeconds(u.id, plan.x, plan.y, prog)));
+                    }
+
                     long stuck = StallWatch.planStuckMillis(u.id, plan.x, plan.y);
                     if (stuck > 3000L) {
                         po.put("stuckSeconds", Math.round(stuck / 1000.0))
