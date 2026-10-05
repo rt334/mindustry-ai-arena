@@ -554,12 +554,18 @@ public final class Snapshot {
         if (!(b instanceof mindustry.world.blocks.production.Drill.DrillBuild db)) return null;
 
         arc.struct.IntSeq seq = new arc.struct.IntSeq();
-        int x = db.tileX(), y = db.tileY(), s = db.block.size;
+        int s = db.block.size;
+        // 多格方块的坐标是**中心**（实测：core-nucleus 覆盖 (287,102)-(291,106)，
+        // 而 /buildings 报 (289,104)）。换算到左上角要用 block.sizeOffset ——
+        // 那是引擎自己的偏移（Tile.java:485 的 getLinkedTiles 就用它），
+        // 别手算 -((size-1)/2)：2x2 时两者都是 0、看着一样，3x3 以上才分道扬镳。
+        int off = db.block.sizeOffset;
+        int x0 = db.tileX() + off, y0 = db.tileY() + off;
         for (int i = 0; i < s; i++) {
-            addNeighbour(seq, x + i, y - 1);                    // 上
-            addNeighbour(seq, x + i, y + s);                    // 下
-            addNeighbour(seq, x - 1, y + i);                    // 左
-            addNeighbour(seq, x + s, y + i);                    // 右
+            addNeighbour(seq, x0 + i, y0 - 1);                  // 上
+            addNeighbour(seq, x0 + i, y0 + s);                  // 下
+            addNeighbour(seq, x0 - 1, y0 + i);                  // 左
+            addNeighbour(seq, x0 + s, y0 + i);                  // 右
         }
         return seq.size == 0 ? null : seq.toArray();
     }

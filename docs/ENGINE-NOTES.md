@@ -28,7 +28,7 @@ Mindustry v160.5 上，把两个 AI 放进同一张图对战，需要知道的�
 
 ## 二、邻近判定（`BuildingComp.updateProximity`）
 
-邻近由「锚点 + `Edges.getEdges(size)` 的偏移集合」决定。
+邻近由「左上角 + `Edges.getEdges(size)` 的偏移集合」决定。
 
 **2×2 建筑的偏移集合**：
 
@@ -39,7 +39,26 @@ Mindustry v160.5 上，把两个 AI 放进同一张图对战，需要知道的�
 **这条的实用价值**：2×2 矿机只要 footprint 与某建筑的 footprint 相邻，产物就会
 **直接推进那个建筑**，中间一格传送带都不需要。
 
-多块建筑的锚点是**左上角**。
+多块建筑的**内部起点是左上角** —— 本节说的偏移都是相对它。
+
+> **别和接口坐标搞混**。引擎内部有两套坐标系：
+>
+> | 用在哪 | 坐标 |
+> |---|---|
+> | `/buildings`、`/place`、`/map` 等**对外接口** | **中心** |
+> | `Edges.getEdges`、`getLinkedTiles`、Tile 索引等**引擎内部** | **左上角** |
+>
+> 换算是 `block.sizeOffset`（`Tile.java:485` 的 `getLinkedTiles` 用的就是它）：
+>
+> ```
+> sizeOffset = -((size - 1) / 2)      // 整数除法
+>   2x2 → 0      中心落在左上那一格
+>   3x3 → -1     中心在正中
+>   5x5 → -2     中心在正中
+> ```
+>
+> 实测：`core-nucleus` 覆盖 `(287,102)-(291,106)`，`/buildings` 报 `(289,104)`。
+> **拿 `sizeOffset = 0` 硬套 3x3 及以上的方块会整体偏一格。**
 
 ---
 

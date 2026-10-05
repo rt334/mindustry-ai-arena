@@ -103,7 +103,9 @@ def main():
         print(f"不可见格 {invis} —— 迷雾下这些格子的数据未经确认，不要据此建造")
 
     for name, _n in ores.most_common():
-        pts = [(t["x"], t["y"]) for t in tiles if t.get("ore") == name]
+        # 必须用 cell_of 判定 —— 矿在 overlay 字段（"ore-copper"），
+        # 不是 tile 上的 "ore" 键。直接查 t.get("ore") 永远是空。
+        pts = [(t["x"], t["y"]) for t in tiles if cell_of(t) == ("ore", name)]
         mx = sum(p[0] for p in pts) / len(pts)
         my = sum(p[1] for p in pts) / len(pts)
         near = min(abs(p[0] - args.cx) + abs(p[1] - args.cy) for p in pts)
