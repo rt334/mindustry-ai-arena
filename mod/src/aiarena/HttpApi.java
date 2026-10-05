@@ -2255,6 +2255,19 @@ public final class HttpApi {
                 .put("teamBatchSends", Diag.teamBatchSends())
                 .put("fullViewSends", Diag.fullViewSends())
                 .put("spectatorRouted", Diag.spectatorRouted())
+                // 规则快照。setup 会临时改其中几项（关保护圈、清禁用表、关 staticFog），
+                // 不暴露出来就只能靠读代码确认它有没有还原。
+                .putRaw("rules", new Json.Obj()
+                    .put("enemyCoreBuildRadius", r.enemyCoreBuildRadius)
+                    .put("blockWhitelist", r.blockWhitelist)
+                    .put("bannedBlocks", r.bannedBlocks.size)
+                    .put("editor", r.editor)
+                    .put("fog", r.fog)
+                    .put("staticFog", r.staticFog)
+                    .put("infiniteResources", r.infiniteResources)
+                    .put("buildCostMultiplier", r.buildCostMultiplier)
+                    .put("buildSpeedMultiplier", r.buildSpeedMultiplier)
+                    .toString())
                 .putRaw("fogState", fogStateJson())
                 .putRaw("players", players.toString())
                 .putRaw("teams", teams.toString())
@@ -3142,6 +3155,17 @@ public final class HttpApi {
             boolean prevStaticFog = r.staticFog;
             r.staticFog = false;
 
+            // 下面还会临时关掉核心保护圈、清空禁用方块表 —— 同样必须先存原值。
+            // 漏了恢复的后果比 staticFog 更重：
+            //   enemyCoreBuildRadius 默认 400f（≈50 格），Rules.java:295 是
+            //       protectCores ? enemyCoreBuildRadius + extraCoreBuildRadius : 0
+            //   归零之后再没人拦得住「贴着别人核心造炮塔」。
+            //   bannedBlocks 则可能被地图用来禁方块，清空后那些方块变成可建。
+            float prevCoreRadius = r.enemyCoreBuildRadius;
+            boolean prevBlockWhitelist = r.blockWhitelist;
+            arc.struct.ObjectSet<mindustry.world.Block> prevBanned = new arc.struct.ObjectSet<>();
+            prevBanned.addAll(r.bannedBlocks);
+
             StringBuilder placed = new StringBuilder("[");
             boolean firstPlaced = true;
             java.util.List<int[]> takenSpots = new java.util.ArrayList<>();
@@ -3289,9 +3313,13 @@ public final class HttpApi {
 
             placed.append(']');
 
-            // 恢复 editor 与 staticFog 状态
+            // 恢复 editor / staticFog / 核心保护圈 / 禁用方块表
             r.editor = prevEditor;
             r.staticFog = prevStaticFog;
+            r.enemyCoreBuildRadius = prevCoreRadius;
+            r.blockWhitelist = prevBlockWhitelist;
+            r.bannedBlocks.clear();
+            r.bannedBlocks.addAll(prevBanned);
 
             // ⚠ 必须**在恢复 staticFog 之后**补推一次迷雾事件。
             //
@@ -4012,17 +4040,30 @@ public final class HttpApi {
             if (!first) sb.append(',');
             first = false;
 
+            // 库存只给自己的队（DESIGN.md 4.4 的刻意偏离，也是 6.2 的前提）：
+            // 原版把每队核心库存无条件广播，本项目改为「按视野 + 需确认」——
+            // 敌方库存要连续可见 600 tick 才由 Intel 状态机放出快照。
+            // 这里如果照样输出，等于让 AI 一进视野就读到对面核心有多少铜，
+            // 整套确认机制被绕过。
+            //
+            // 其余字段不动：朝向、效率、电力条都是画在屏幕上的，玩家看得见。
+            boolean ownTeam = (b.team == myTeam) || admin;
+
             StringBuilder its = new StringBuilder("{");
-            for (int i = 0; i < b.items.length; i++) {
-                if (i > 0) its.append(',');
-                its.append(Json.str(b.items[i])).append(':').append(b.itemAmounts[i]);
+            if (ownTeam) {
+                for (int i = 0; i < b.items.length; i++) {
+                    if (i > 0) its.append(',');
+                    its.append(Json.str(b.items[i])).append(':').append(b.itemAmounts[i]);
+                }
             }
             its.append('}');
 
             StringBuilder lqs = new StringBuilder("{");
-            for (int i = 0; i < b.liquids.length; i++) {
-                if (i > 0) lqs.append(',');
-                lqs.append(Json.str(b.liquids[i])).append(':').append(b.liquidAmounts[i]);
+            if (ownTeam) {
+                for (int i = 0; i < b.liquids.length; i++) {
+                    if (i > 0) lqs.append(',');
+                    lqs.append(Json.str(b.liquids[i])).append(':').append(b.liquidAmounts[i]);
+                }
             }
             lqs.append('}');
 
