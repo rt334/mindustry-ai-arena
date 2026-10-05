@@ -270,7 +270,7 @@
 | # | 复盘的说法 | 现状 |
 |---|---|---|
 | 1 | `acceptsFrom` 没有任何实现 | **已实现**。`Snapshot.java:499` `acceptsFrom = conveyorInputs(b)`，`HttpApi` 用 `if (b.acceptsFrom != null) o.putRaw("acceptsFrom", ...)` 输出。核对时若抽样的第一个建筑是核心（非 conveyor），该字段本就是 null 故不输出，**别据此判定「没实现」** —— 要看带子。 |
-| 2 | 钻机往哪几格推货查不到 | **部分已实现**：`Snapshot.java:501` `if (sendsTo == null) sendsTo = drillOutputs(b)`，钻机输出格已塞进 `sendsTo`。仍缺的是「实际生效的 rot」与 footprint 锚点差异的解释。 |
+| 2 | 钻机往哪几格推货查不到 | **已做完**。输出格：`Snapshot.java:501` `sendsTo = drillOutputs(b)`。锚点差异：`Actor.place` 的返回体现在带 `appliedRot` / `anchorX` / `anchorY` / `size` —— 多格方块在引擎里按**左上角**定位而接口给**中心**（`sizeOffset = -((size-1)/2)`），与其让每个 AI 自己推这个偏移，不如把换回来的结果直接给出。**未运行时验证。** |
 | 3 | `/queue` 只给数量不给坐标与进度 | **已实现**。`Operations.java:447-483` 每个计划带 `x` / `y` / `block` / `breaking` / `constructing` / `progress` / `stuckSeconds` / `stuckReason` / `hint` —— 坐标、进度、卡住原因都有。复盘那条是旧状态。 |
 | 4 | `/units` 缺「当前在建哪个方块」 | **已实现**。`HttpApi.java:4239` 给 `buildingAt: {x, y, progress, block}`，正是复盘要的那四个字段。 |
 | 7 | `/place` 的 `config` 参数无效 | **已修，而且代码里记着这条教训**。`Actor.java:134-141` 专门把字符串 config 解析成引擎对象，注释写明：`BuildingComp.configured()` 按 `value.getClass()` 查 `block.configurations`，**直接传 String 一律匹配不上，配置会静默失效**（方块建出来了，config 是空的）。正是从复盘那次踩坑学到并修掉的。（同一行的「sorter `rotation` 回读恒 0」是条目 11，仍待实机确认。） |
@@ -338,6 +338,7 @@
 | 写队列每 tick 预算 | 只编译过 | 缺：并发写压测，看 1007 是否按预期出现、主线程是否真的没被按住 |
 | SSE `/stream` | 只编译过 | 缺：连上去看事件逐条推送、心跳、1006 重同步、并发上限 8 是否生效 |
 | 蓝图导入/导出 | 只编译过 | 缺：导出一段真实产线再导回去；特别是「多格方块只记锚点」只做了静态推理 |
+| `/place` 的 `appliedRot` / `anchorX` / `anchorY` / `size` | 只编译过 | 缺：放一个 2x2 与一个 1x1，核对 `anchorX/Y` 是否算对（纯增字段，不改行为，风险低） |
 | 接口版本号 `API_VERSION` | 只编译过 | 缺：`/ping` 实际返回里有没有 `apiVersion` |
 | 录像 `meta.apiVersion` | 只编译过 | 缺：录一段再看头里有没有这个字段 |
 | `start.py` | **部分验过** | `check` / `status` / `--help` 实测；`play` / `watch` 未跑（会启游戏） |

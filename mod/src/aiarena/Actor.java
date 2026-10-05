@@ -204,6 +204,26 @@ public final class Actor {
             }
         } catch (Throwable ignored) { }
 
+        // 实际生效的朝向 + 多格方块换回锚点后的坐标。
+
+        //
+
+        // 复盘把这条列为头号时间黑洞：同一个 rot、同样的参数，落点与输出方向
+
+        // 却不一样。根因是坐标系 —— 多格方块在引擎里按**左上角**定位，
+
+        // 而接口一律给**中心**（block.sizeOffset = -((size-1)/2)）。
+
+        // 与其让每个 AI 自己推这个偏移，不如把它换回来的结果直接给出。
+
+        extra.put("appliedRot", rotation);
+
+        extra.put("anchorX", x + (int) block.sizeOffset);
+
+        extra.put("anchorY", y + (int) block.sizeOffset);
+
+        extra.put("size", block.size);
+
         if (resolvedConfig != null) extra.put("config", describeConfig(resolvedConfig));
         if (configWarning != null) extra.put("configWarning", configWarning);
 
