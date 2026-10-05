@@ -285,9 +285,10 @@ public final class Operations {
 
         if (r.accepted == 0) {
             String why = r.firstErrors.isEmpty() ? "no tile accepted" : r.firstErrors.first();
-            return Actor.Result.err(1005, "batch rejected: " + r.summary() + " — " + why);
+            return Actor.Result.err(1005, "batch rejected: " + r.summary() + " — " + why,
+                                   summaryJson(r));
         }
-        return Actor.Result.ok("batch " + r.summary());
+        return Actor.Result.ok("batch " + r.summary(), summaryJson(r));
     }
 
     /** 批量下单拆除。 */
@@ -314,9 +315,10 @@ public final class Operations {
 
         if (r.accepted == 0) {
             String why = r.firstErrors.isEmpty() ? "no tile accepted" : r.firstErrors.first();
-            return Actor.Result.err(1005, "batch rejected: " + r.summary() + " — " + why);
+            return Actor.Result.err(1005, "batch rejected: " + r.summary() + " — " + why,
+                                   summaryJson(r));
         }
-        return Actor.Result.ok("batch " + r.summary());
+        return Actor.Result.ok("batch " + r.summary(), summaryJson(r));
     }
 
     // ---------------------------------------------------------------- spawn
@@ -537,6 +539,27 @@ public final class Operations {
         return "unknown";
     }
 
+    /**
+     * 批量的结构化结果。
+     *
+     * message 里那串「requested=N accepted=M skipped[...]」是给人看的散文；
+     * 这里给出同义字段供程序读。**必须有** —— 否则响应里的 tiles（请求数）
+     * 会被读成「这么多条都排上了」，而超过 MAX_PLANS_PER_UNIT 的部分
+     * 是**静默丢弃**的：实测 70 格批量返回 ok、tiles=70，实际只接受了 60。
+     */
+    private static Json.Obj summaryJson(BatchResult r) {
+        return new Json.Obj()
+            .put("requested", r.requested)
+            .put("accepted", r.accepted)
+            .putRaw("skipped", new Json.Obj()
+                .put("invalid", r.skippedInvalid)
+                .put("invisible", r.skippedInvisible)
+                .put("noUnit", r.skippedNoUnit)
+                .toString())
+            .put("limitReached", r.accepted >= MAX_PLANS_PER_UNIT)
+            .put("plansPerUnit", MAX_PLANS_PER_UNIT);
+    }
+
     /** 清空队伍所有建造单位的待办计划。 */
     public static Actor.Result clearQueue(Team team) {
         int n = 0;
@@ -545,6 +568,7 @@ public final class Operations {
             n += u.plans.size;
             u.plans.clear();
         }
-        return Actor.Result.ok("cleared " + n + " pending plan(s)");
+        return Actor.Result.ok("cleared " + n + " pending plan(s)",
+                               new Json.Obj().put("cleared", n));
     }
 }

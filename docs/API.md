@@ -509,7 +509,35 @@ progress=0.99  rate=0.70  eta=0
 早期只给一个 `plans` 计数，AI 拿不到坐标 —— 想加速建造就得自己维护一份 pending
 清单，而丢单会让清单和服务端实际状态对不上。有了 `planList` 才能精确定位卡住的计划。
 
-`POST /queue?clear=true` 清空全队待办计划，返回清掉了几条。
+`POST /queue?clear=true` 清空全队待办计划：
+
+```json
+{"cleared": 60, "message": "cleared 60 pending plan(s)"}
+```
+
+`cleared` 是结构化字段，直接读它 —— 别去解析 message。
+
+### 批量下单的返回：`tiles` 是请求数，`accepted` 才是排上的
+
+`/place` 与 `/break` 走 `shape=` 时是批量。返回里两套数字**含义不同**：
+
+| 字段 | 含义 |
+|---|---|
+| `tiles` | 你**请求**了多少格 |
+| `requested` | 同上（显式字段） |
+| `accepted` | 真正排上队的条数 |
+| `skipped` | `{invalid, invisible, noUnit}` 的分项 |
+| `limitReached` | 是否撞到了 `plansPerUnit`（默认 60） |
+
+**超过 `plansPerUnit` 的部分是被静默丢弃的**：实测请求 70 格、队列上限 60，
+返回 `ok: true` 而 `accepted` 只有 60。只读 `tiles` 会以为 70 条都排上了。
+
+```json
+{"requested":70, "accepted":60, "skipped":{"invalid":10,"invisible":0,"noUnit":0},
+ "limitReached":true, "plansPerUnit":60, "tiles":70, "shape":"line", "message":"..."}
+```
+
+想确认到底排上了多少，**读 `accepted`，或者直接看 `/queue` 的 `plans`**。
 
 ### `GET /diag`
 

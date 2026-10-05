@@ -111,6 +111,11 @@ class Arena:
                 time.sleep(delay)                        # 重连退避，不是「等建造」
                 delay = min(delay * 2, self.max_delay)
                 self.reconnects += 1
+        # 退避重试用尽。若最后一次是 429，就如实报限流码 ——
+        # 统一报成 -1（连不上）会让调用方去查网络，而真正该做的是降频。
+        # 实测：一波密集请求被打回 429，脚本却显示 "unreachable"，白查了半天。
+        if isinstance(last, urllib.error.HTTPError) and last.code == 429:
+            raise ArenaError(1429, f"rate limited (retries exhausted): {last}")
         raise ArenaError(-1, f"unreachable after retries: {last}")
 
     def get(self, path, **params):

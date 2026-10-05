@@ -520,13 +520,13 @@ public final class HttpApi {
             postToGame(ex, () -> {
                 Actor.Result r = Operations.placeBatch(team, pp.points, pp.rotations,
                                                        block, rot, config);
-                if (!r.ok) return Json.error(r.code, r.message);
-                return Json.ok(new Json.Obj()
-                    .put("shape", "path")
+                Json.Obj body = (r.extra == null) ? new Json.Obj() : r.extra;
+                body.put("shape", "path")
                     .put("tiles", pp.points.size)
                     .putRaw("rotations", rotationsJson(pp))
-                    .put("message", r.message)
-                    .toString());
+                    .put("message", r.message);
+                // 失败时也把 body 带上：skipped 分解就在里面，丢了只剩一句散文
+                return r.ok ? Json.ok(body.toString()) : Json.error(r.code, r.message, body);
             });
             return;
         }
@@ -540,11 +540,9 @@ public final class HttpApi {
         postToGame(ex, () -> {
             var pts = Operations.shape(shape, x1, y1, x2, y2, radius);
             Actor.Result r = Operations.placeBatch(team, pts, block, rot, config);
-            return r.ok ? Json.ok(new Json.Obj()
-                              .put("message", r.message)
-                              .put("shape", shape.name())
-                              .put("tiles", pts.size).toString())
-                        : Json.error(r.code, r.message);
+            Json.Obj body = (r.extra == null) ? new Json.Obj() : r.extra;
+            body.put("message", r.message).put("shape", shape.name()).put("tiles", pts.size);
+            return r.ok ? Json.ok(body.toString()) : Json.error(r.code, r.message, body);
         });
     }
 
@@ -586,11 +584,9 @@ public final class HttpApi {
         postToGame(ex, () -> {
             var pts = Operations.shape(shape, x1, y1, x2, y2, radius);
             Actor.Result r = Operations.breakBatch(team, pts);
-            return r.ok ? Json.ok(new Json.Obj()
-                              .put("message", r.message)
-                              .put("shape", shape.name())
-                              .put("tiles", pts.size).toString())
-                        : Json.error(r.code, r.message);
+            Json.Obj body = (r.extra == null) ? new Json.Obj() : r.extra;
+            body.put("message", r.message).put("shape", shape.name()).put("tiles", pts.size);
+            return r.ok ? Json.ok(body.toString()) : Json.error(r.code, r.message, body);
         });
     }
 
@@ -733,7 +729,9 @@ public final class HttpApi {
         postToGame(ex, () -> {
             if (clear) {
                 Actor.Result r = Operations.clearQueue(team);
-                return Json.ok(new Json.Obj().put("message", r.message).toString());
+                Json.Obj body = (r.extra == null) ? new Json.Obj() : r.extra;
+                body.put("message", r.message);
+                return Json.ok(body.toString());
             }
             return Json.ok(new Json.Obj()
                 .put("agent", agent.id).put("team", team.name)
@@ -3386,7 +3384,11 @@ public final class HttpApi {
         // HTTP 线程等待两阶段完成。setup 涉及换图与整帧调度，给足 8 秒。
         try {
             String json = future.get(8000, TimeUnit.MILLISECONDS);
-            boolean isError = json != null && json.contains("\"ok\":false");
+            // 只认开头，不能全文搜。成功响应里也会出现 "ok":false ——
+            // /place 在材料不足时，materials.requirements 每一项都带着
+            // {"ok":false,"short":N}，全文匹配会把「计划已排上」判成错误，
+            // 回出 HTTP 400 配 body {"ok":true,...}，调用方按状态码分流就中招。
+            boolean isError = json != null && json.startsWith("{\"ok\":false");
             respond(ex, isError ? statusFor(json) : 200, json);
         } catch (java.util.concurrent.TimeoutException te) {
             respond(ex, 504, Json.error(1007, "setup did not finish within 8000 ms"));
@@ -4141,7 +4143,11 @@ public final class HttpApi {
 
         try {
             String json = future.get(POST_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-            boolean isError = json != null && json.contains("\"ok\":false");
+            // 只认开头，不能全文搜。成功响应里也会出现 "ok":false ——
+            // /place 在材料不足时，materials.requirements 每一项都带着
+            // {"ok":false,"short":N}，全文匹配会把「计划已排上」判成错误，
+            // 回出 HTTP 400 配 body {"ok":true,...}，调用方按状态码分流就中招。
+            boolean isError = json != null && json.startsWith("{\"ok\":false");
             respond(ex, isError ? statusFor(json) : 200, json);
         } catch (java.util.concurrent.TimeoutException te) {
             respond(ex, 504, Json.error(1007, "game thread did not respond within "
