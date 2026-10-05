@@ -450,7 +450,7 @@ conveyor (283,109) rot=0   acceptsFrom=[[282,109]]         sendsTo=[[284,109]]
 | `breaking` | `true` = 这是拆除计划 |
 | `constructing` / `progress` | **只在该格已在施工时出现**：施工进度 0~1 |
 | `progressRate` / `etaSeconds` | 实测进度变化率（进度/秒）与据此外推的剩余秒数 |
-| `stuckSeconds` / `hint` | **只在真的卡住时出现**，见下 |
+| `stuckSeconds` / `stuckReason` / `hint` | **只在真的卡住时出现**，见下 |
 
 #### `stuckSeconds`：卡住的计划
 
@@ -460,6 +460,22 @@ conveyor (283,109) rot=0   acceptsFrom=[[282,109]]         sendsTo=[[284,109]]
 ```
 
 判据是**进度连续不变、且建造单位自己也不动**，持续超过 3 秒。
+
+`stuckReason` 说明**为什么卡** —— 四种取值，前三种都对应玩家能直接看到的现象：
+
+| 取值 | 含义 | 你该做什么 |
+|---|---|---|
+| `missingMaterials` | 核心里的料不够了（`/place` 时够，后来被别的建造消耗掉） | 补产该物品，或 `POST /queue?clear=true` 清掉这条 |
+| `tileOccupied` | 那格上已经站着别的建筑 | `/break` 拆掉，或对同格再 `/place` 一次改目标 |
+| `builderTooFar` | 单位离工地比 `buildRange` 还远 | 用 `/control?op=order` 把它送过去 |
+| `unknown` | 单位自己的状态机卡死 —— **从外部判定不了，如实报 unknown** | 试 `op=order` 推一把 |
+
+`hint` 按 `stuckReason` 给对应的解法。**注意它只有在 `builderTooFar` 时才建议移动命令** ——
+被墙挡住的话推过去还会卡回来，那不是解法。
+
+> `missingMaterials` 是那种「`/place` 时说够、之后悄悄变不够」的情况：
+> 材料被别的建造消耗了，队列里的计划就一直卡着。以前只报「卡了 12 秒」，
+> 看不出是这个原因。
 
 #### `progressRate` / `etaSeconds`：还要多久
 
