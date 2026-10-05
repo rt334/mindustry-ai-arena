@@ -239,6 +239,16 @@ public final class StallWatch {
      * @return 报警类型；null 表示正常
      */
     private static String classify(Building b) {
+        // ---- 需要电但没电：屏幕上就是空/红的电力条 ----
+        //
+        // 放在最前面：这是最根本的原因，也是肉眼最先看到的。
+        // 发电机不消费电（它们输出电），所以不会被这条命中。
+        if (needsPower(b) && b.power != null && b.power.status <= 0.001f) {
+            int links = (b.power.links == null) ? 0 : b.power.links.size;
+            // 没接任何线 / 接了线但没电 —— 两种都是玩家看得见的
+            return links == 0 ? "powerUnconnected" : "powerStarved";
+        }
+
         // ---- 传送带：引擎自己的 clogHeat ----
         if (b instanceof Conveyor.ConveyorBuild cb) {
             boolean hasItems = b.items != null && b.items.total() > 0;
@@ -280,6 +290,20 @@ public final class StallWatch {
         }
 
         return null;
+    }
+
+    /**
+     * 这个方块是否**消费**电。
+     *
+     * 不能用 Block.consumesPower —— 它默认就是 true（Block.java:53），
+     * 每个方块都会命中。得看它有没有注册 ConsumePower。
+     */
+    private static boolean needsPower(Building b) {
+        if (b.block.consumers == null) return false;
+        for (var c : b.block.consumers) {
+            if (c instanceof ConsumePower) return true;
+        }
+        return false;
     }
 
     /**
@@ -390,6 +414,9 @@ public final class StallWatch {
      */
     private static String causeOf(Building b, String kind) {
         if ("missingInput".equals(kind)) return "starved";
+        // 电力问题既不是「上游没来货」也不是「下游不收」—— 查电网
+        if ("powerUnconnected".equals(kind)) return "unpowered";
+        if ("powerStarved".equals(kind)) return "underpowered";
 
         boolean accepts = sideAccepts(b, b.rotation);
         if (!accepts) {
