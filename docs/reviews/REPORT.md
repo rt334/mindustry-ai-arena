@@ -76,7 +76,7 @@
 | 脚本 | 用途 |
 |---|---|
 | `arena_ops.py` | 带限速/重试的接口客户端 + 批量下单/拆除 + 轮询确认 |
-| `acc4.py` | 建造加速器（按 pending.json 循环 warp 建造单位） |
+| `acc4.py` | 建造加速器（按 pending.json 循环 warp 建造单位）——⚠ **该工具用 warp（直接改坐标的瞬移），真人玩家做不到，它跑出的吞吐数字不可作可比基线**，见 [REVIEW-ADDENDUM.md](REVIEW-ADDENDUM.md) §四。 |
 | `outlet_audit.py` | 逐台钻机算出四个输出侧谁在接货——**定位"死口"最快** |
 | `blocked.py` / `audit.py` / `trace.py` | 堵点、缺格、逐格 items 追踪 |
 | `coal_cover.py` | 煤格覆盖率分析（找未覆盖煤格 + 候选钻机位） |

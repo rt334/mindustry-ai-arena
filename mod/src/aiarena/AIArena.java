@@ -36,6 +36,20 @@ public final class AIArena {
 
     public static String bind = "127.0.0.1";
     public static int port = 7199;
+
+    /**
+     * 接口版本号。**跨版本的对局成绩不可比** —— 成绩记录必须带上它。
+     *
+     * 约定（详见 docs/API.md）：
+     *   major  +1  破坏性：删字段、改字段语义、改默认行为
+     *   minor  +1  增量：只加字段 / 只加端点，老客户端仍然能用
+     *
+     * 之所以要它：这个接口改过不少次（`stuckReason`、批量的 requested/accepted、
+     * `/queue` 的 cleared、`/drill` 的 itemsPerSecond、SSE、蓝图……），
+     * 而 `reviews/` 里几批数据是不同时期跑的。没有版本号，
+     * 「这局 AI 是 3.2/s 那局 AI 是 2.1/s」根本说不清是不是同一个接口。
+     */
+    public static final String API_VERSION = "1.4";
     public static int ratePerSecond = 60;
     public static int rateBurst = 200;
 
@@ -614,6 +628,7 @@ public final class AIArena {
                 String base = "http://" + bind + ":" + port + "/v1/" + ag.id;
                 String json = new Json.Obj()
                     .put("agent", ag.id)
+                    .put("apiVersion", API_VERSION)
                     .put("httpPort", port)
                     .put("httpBase", base)
                     .toString();

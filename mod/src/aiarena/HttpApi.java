@@ -69,6 +69,7 @@ public final class HttpApi {
                         .put("ok", true)
                         .putRaw("data", new Json.Obj()
                             .put("headless", Vars.headless)
+            .put("apiVersion", AIArena.API_VERSION)
                             .put("tick", s.tick)
                             .put("agents", AIArena.agents.size())
                             .toString())
