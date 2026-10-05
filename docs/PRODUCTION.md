@@ -69,31 +69,59 @@ solar-panel stuck=311 reason=missingMaterials: solar-panel needs 8 silicon, core
 **煤是当前瓶颈**。2 台钻机毛产 ~0.7/s，消费者有核心 + 冶炼厂 + 发电机 + 压机。
 核心会**无限吸煤**（钻机与它相邻就白送），这轮被它吃掉 198 煤。
 
-## 四、可达性：「+5/s」在这个图上行不行
+## 四、产率模型（已从引擎源码确认，并实测复核）
 
-核心 `fogRadius = 61`，所以视野远大于一开始以为的 30 格。把 ±90 格切成
-多个 61×61（3721 格，在 `/map` 单次 4096 上限内）分别请求，得到真实矿脉普查：
+**公式**（`Mindustry-src/core/src/mindustry/world/blocks/production/Drill.java`）：
 
-| 矿 | 矿格 | 连通块 | 可放钻机位（含矿≥1） | 按单台 ~0.35/s 外推上限 |
+```java
+// Drill.java:303 —— 注意 dominantItems 是直接乘数
+lastDrillSpeed = (speed * dominantItems * warmup) / delay;
+// Drill.java:171
+delay = (drillTime + hardnessDrillMultiplier * item.hardness) / drillMultiplier;
+// hardnessDrillMultiplier = 50
+// Drill.java:149 放置预览里直接印了这个式子
+text = 60f / getDrillTime(item) * returnCount   // 个/秒
+```
+
+即 **每秒产率 = 60 × 矿格数 ÷ (drillTime + 50 × 硬度) × warmup**。
+
+`dominantItems` 是钻机脚印内的主矿格数，**上限 size×size**。所以产率正比于
+脚下了几格矿 —— 不是「有矿就行」。上一版用「前后产率差」测这个，
+结果被 `Actor.place` 的扣料污染（铜产率一度测成 −0.400/s），白跑一轮。
+
+### 各种钻机
+
+| 钻机 | 占地 | tier | drillTime | 成本 |
 |---|---|---|---|---|
-| 铜 | 340 | 24 | **40** | **14.0 /s** ✓ |
-| 铅 | 136 | 15 | **15** | **5.25 /s** ✓（刚好够，余量为零） |
-| 钛 | 90 | 5 | **6** | **2.10 /s** ✗ |
-| 钍 | 98 | 9 | 9 | 3.15 /s |
-| 煤 | 137 | 8 | 5 | 1.75 /s（是输入，不是目标） |
+| mechanical-drill | 2×2 | 2 | **600** | copper 12 |
+| pneumatic-drill | 2×2 | 3 | **400** | copper 18 + graphite 10 |
+| laser-drill | 3×3 | 4 | **280** | copper 35 + graphite 30 + silicon 30 + titanium 20 |
+| blast-drill | 4×4 | 5 | **280** | copper 65 + silicon 60 + titanium 50 + thorium 75 |
 
-**结论：「钛 +5/s」在这张图上做不到。** 整个 ±90 格里只有 6 个能放钻机的钛矿点，
-按现有单台产率外推封顶 ~2.1/s。铅刚好卡在 5.25/s，考虑走线占位与供料，
-实际会低于目标。
+`tier` 是能挖的最高硬度。**mechanical 挖不了钛（tier2 < 硬度3）；
+pneumatic 挖不了钍（tier3 < 硬度4）。**
 
-这不是「还没铺到」，是**矿脉密度的硬上限**。要突破只能：
-1. **换更大的钻机**。`laser-drill`（3×3）与 `blast-drill`（4×4）的 `drillTime`
-   更短，单台产率高于机械钻；但 3×3/4×4 的空地位点更少，需要重新普查。
-2. **扩大视野**。上面只扫了核心周边 ±90 格；地图更大，远处可能还有矿脉，
-   但把矿从远处运回来要长距离传送，代价另算。
-3. **改目标**。把「+5/s 钛」换成图上可达的数字。
+### 实测复核
 
-## 五、还没定下来的问题：矿格数影响产率吗
+在 4 格煤矿上放一台机械钻（无输出，自然填满）：
+
+```
+矿格=4  硬度=2  warmup≈0.93
+引擎公式   60 × 4 / (600 + 50×2) = 0.343 /s
+接口字段   itemsPerSecond        = 0.32
+比值 0.933  ← 正好是当时的 warmup
+```
+
+### ⚠ `lastDrillSpeed` 是**每 tick**，不是每秒
+
+引擎 UI 要 `lastDrillSpeed * 60 * timeScale` 才是每秒（`Drill.java:118`）。
+它只有两位小数，`0.01` 可能对应真实 `0.0062` —— 我照着「个/秒」写注释，
+结果看到 `0.01` 以为 100 秒才出一个矿，和实测的 0.35/s 对不上，白查一轮。
+
+**已修**：`/drill` 现在同时给出 `itemsPerSecond`（在 Java 里先 ×60 再序列化，
+绕开两位小数的舍入）与 `dominantItems`。**读 `itemsPerSecond`。**
+
+## 五、可达性：用正确的模型重算
 
 已知事实：
 

@@ -772,7 +772,11 @@ public final class HttpApi {
      *   canMine        tier >= oreHardness
      *   progress       钻井进度（0..1，到 1 出一个矿）
      *   warmup         预热（0..1，刚放下的机器要爬升）
-     *   lastDrillSpeed 当前产出速率（个/秒）
+     *   lastDrillSpeed **每 tick** 速率（引擎字段，只两位小数，
+     *                  0.01 可能对应真实 0.0062 —— 别当每秒读）
+     *   itemsPerSecond  每秒产出（= lastDrillSpeed × 60）。**读这个**
+     *   dominantItems   钻机脚印内的主矿格数。产率**正比于它**：
+     *                   每秒 = 60 × dominantItems ÷ (drillTime + 50 × 硬度)
      *   full           缓冲区是否满了
      */
     /**
@@ -1565,6 +1569,8 @@ public final class HttpApi {
                     .put("progress", d.progress())
                     .put("warmup", d.warmup)
                     .put("lastDrillSpeed", d.lastDrillSpeed)
+                    .put("itemsPerSecond", d.lastDrillSpeed * 60f)
+                    .put("dominantItems", d.dominantItems)
                     .put("efficiency", b.efficiency)
                     .put("enabled", b.enabled)
                     .put("full", b.items.total() >= b.block.itemCapacity)
@@ -3962,6 +3968,8 @@ public final class HttpApi {
                 .put("progress", d.progress())
                 .put("warmup", d.warmup)
                 .put("lastDrillSpeed", d.lastDrillSpeed)
+                .put("itemsPerSecond", d.lastDrillSpeed * 60f)
+                .put("dominantItems", d.dominantItems)
                 .put("efficiency", b.efficiency)
                 .put("enabled", b.enabled)
                 .put("full", b.items.total() >= b.block.itemCapacity)
