@@ -59,6 +59,85 @@ public final class StallWatch {
         stalledSince.clear();
         stalledKind.clear();
         lastSnapshot = "[]";
+        planProgress.clear();
+        planStuckSince.clear();
+        unitPos.clear();
+    }
+
+    // ---------------------------------------------------------------- 计划停滞
+
+    /** key = "unitId@x,y" -> 上次看到的进度（0~1）。 */
+    private static final Map<String, Float> planProgress = new HashMap<>();
+    /** key = "unitId@x,y" -> 进度**首次**不再变化的毫秒时刻。 */
+    private static final Map<String, Long> planStuckSince = new HashMap<>();
+    /** unitId -> [x, y]，判断建造单位自己有没有在动。 */
+    private static final Map<Integer, float[]> unitPos = new HashMap<>();
+
+    /**
+     * 跟踪建造计划有没有卡住。
+     *
+     * 判据是**进度是否还在变** —— 同一个 progress 连续保持才算停滞，
+     * 和 clogHeat 那套一样用的是状态而不是时长。真人判断「卡住了」也是这么看：
+     * 单位站在原地不动、方块迟迟不出现。
+     *
+     * 动机：队列卡死时 AI 只能看到一个不变的计划数，既不知道卡在哪一格、
+     * 也不知道卡了多久 —— 而这两件事抬眼就能看见。
+     */
+    /** 建造单位位置变化超过这个距离（格）就算「在动」。 */
+    private static final float MOVING_EPS = 0.5f;
+
+    public static void updatePlans() {
+        long now = System.currentTimeMillis();
+        java.util.HashSet<String> seen = new java.util.HashSet<>();
+        java.util.HashSet<Integer> aliveUnits = new java.util.HashSet<>();
+
+        for (mindustry.gen.Unit u : mindustry.gen.Groups.unit) {
+            if (u == null) continue;
+            aliveUnits.add(u.id);
+
+            // 这个单位自己有没有在动？走路中的单位不算「卡住」——
+            // 它只是还没走到工地。
+            float[] pp = unitPos.get(u.id);
+            boolean moved = pp == null
+                || Math.abs(pp[0] - u.x) > MOVING_EPS
+                || Math.abs(pp[1] - u.y) > MOVING_EPS;
+            unitPos.put(u.id, new float[]{u.x, u.y});
+
+            if (u.plans == null) continue;
+            for (mindustry.entities.units.BuildPlan plan : u.plans) {
+                if (plan == null) continue;
+                String key = u.id + "@" + plan.x + "," + plan.y;
+                seen.add(key);
+
+                float prog = plan.progress;
+                Building tb = Vars.world.build(plan.x, plan.y);
+                if (tb instanceof mindustry.world.blocks.ConstructBlock.ConstructBuild cb) {
+                    prog = cb.progress;          // 已在施工的格子，进度以它为准
+                }
+
+                // 单位在走动就一律重置计时：进度为 0 是「还没开工」，不是停滞
+                Float prev = planProgress.get(key);
+                boolean progressed = prev != null && Math.abs(prev - prog) > 1e-4f;
+                planProgress.put(key, prog);
+
+                if (moved || progressed) {
+                    planStuckSince.remove(key);  // 有动作，重新计时
+                } else if (!planStuckSince.containsKey(key)) {
+                    planStuckSince.put(key, now); // 单位和进度都停住了
+                }
+            }
+        }
+
+        // 计划消失（建完了、被替换了、被清了）就丢掉
+        planProgress.keySet().removeIf(k -> !seen.contains(k));
+        planStuckSince.keySet().removeIf(k -> !seen.contains(k));
+        unitPos.keySet().removeIf(id -> !aliveUnits.contains(id));
+    }
+
+    /** 该计划已经多久没动了（毫秒）；没停滞返回 0。 */
+    public static long planStuckMillis(int unitId, int x, int y) {
+        Long since = planStuckSince.get(unitId + "@" + x + "," + y);
+        return since == null ? 0L : System.currentTimeMillis() - since;
     }
 
     /**

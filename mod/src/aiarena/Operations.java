@@ -450,6 +450,15 @@ public final class Operations {
                     if (tb instanceof mindustry.world.blocks.ConstructBlock.ConstructBuild cb) {
                         po.put("constructing", true).put("progress", cb.progress);
                     }
+                    // 进度连续不动 = 卡住。超过 3 秒才报，免得把正常的启动间隔
+                    // 当成异常。真人是靠「单位站着不动、方块不出现」看出来的。
+                    long stuck = StallWatch.planStuckMillis(u.id, plan.x, plan.y);
+                    if (stuck > 3000L) {
+                        po.put("stuckSeconds", Math.round(stuck / 1000.0))
+                          .put("hint", "move the builder to the site to break it loose: "
+                                     + "/control?op=order&unit=" + u.id
+                                     + "&x=" + plan.x + "&y=" + plan.y);
+                    }
                     plans.append(po.toString());
                 }
             }

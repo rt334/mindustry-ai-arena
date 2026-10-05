@@ -350,7 +350,26 @@ conveyor (283,109) rot=0   acceptsFrom=[[282,109]]         sendsTo=[[284,109]]
 | `x` `y` | 目标格（锚点） |
 | `block` | 目标方块 |
 | `breaking` | `true` = 这是拆除计划 |
-| `constructing` / `progress` | **只在该格已在施工时出现**：0 = 刚开工，长时间不涨就是卡住了 |
+| `constructing` / `progress` | **只在该格已在施工时出现**：施工进度 0~1 |
+| `stuckSeconds` / `hint` | **只在真的卡住时出现**，见下 |
+
+#### `stuckSeconds`：卡住的计划
+
+```json
+{"x":314,"y":79,"block":"conveyor","stuckSeconds":12,
+ "hint":"move the builder to the site to break it loose: /control?op=order&unit=219&x=314&y=79"}
+```
+
+判据是**进度连续不变、且建造单位自己也不动**，持续超过 3 秒。
+
+> **为什么还要看单位动没动**：`BuilderComp` 只在目标格变成施工中之后才把施工进度
+> 写回计划 —— 单位还在赶路的这段时间里进度恒为 0，**不变，但不是卡住**。
+> 只看进度会把「离得远、还在走过去」误报成停滞。真人判断卡住看的也正是这两件事：
+> 方块不出现、单位也站着不动。
+
+`hint` 直接给出验证过的解法：**队列卡死时用移动命令把它推开**
+（`/control?op=order` 收格坐标），实测 `plans` 一次从 56 降到 1，沿线方块真的建成。
+`/break` 对排队中的计划**无效**，反而会追加拆除计划。
 
 早期只给一个 `plans` 计数，AI 拿不到坐标 —— 想加速建造就得自己维护一份 pending
 清单，而丢单会让清单和服务端实际状态对不上。有了 `planList` 才能精确定位卡住的计划。
@@ -374,7 +393,36 @@ conveyor (283,109) rot=0   acceptsFrom=[[282,109]]         sendsTo=[[284,109]]
 
 ### `GET /events`
 
-事件流。
+事件流，**游标增量**：`?since=<seq>` 只返回该游标之后的事件，响应里带 `nextSince`。
+
+| 字段 | 含义 |
+|---|---|
+| `since` / `nextSince` | 本次起点 / 下次该传的值 |
+| `count` / `buffered` | 本次条数 / 缓冲区里还有多少 |
+| `events[]` | `{seq, tick, type, team, x, y, detail}` |
+
+#### 用它替代全量拉 `/buildings`
+
+**想知道「自上次以来产线变了什么」，不用重拉 250+ 条建筑再自己 diff。**
+`/events` 的差分补齐覆盖了这几类：
+
+| 事件 | 触发 |
+|---|---|
+| `buildAppear` / `buildGone` | 方块建好 / 被拆 |
+| `unitAppear` / `unitGone` | 单位出现 / 消失 |
+| `configure` | 方块配置改变 |
+| `blockPlace` | 下单成功 |
+
+实测建 5 个 conveyor，增量只拿到 5 条 `buildAppear`（各带 `detail.{x,y,block}`），
+而不是全量那份建筑表：
+
+```
+{"seq":8,"tick":373,"type":"buildAppear","team":2,"x":2184.0,"y":632.0,
+ "detail":{"x":273,"y":79,"block":"conveyor"}}
+```
+
+**推荐用法**：开局拉一次 `/buildings` 建基线，之后用 `/events?since=<nextSince>`
+维护增量。方块只存增量这一条对客户端同样适用 —— 多数方块长期不变。
 
 ### `GET /intel`
 
@@ -475,7 +523,30 @@ conveyor (283,109) rot=0   acceptsFrom=[[282,109]]         sendsTo=[[284,109]]
 默认由**当前接管的单位**执行（`/control?op=enter&unit=<id>` 之后就是它），没有则任选一个可建造单位。
 传 `unit=<id>` 可显式指定。响应里的 `builder` 字段回显实际用了谁。
 
-### `/place` 的 `config`：随建造一起设
+### 多个建造单位
+
+**引擎里每个单位有各自的建造队列**，而 `/place` 默认只把计划交给其中一个
+（被接管的那个，否则第一个可建造的）。要驱动多个单位并行干活，自己分派：
+
+1. `GET /units` 取所有 `canBuild=true` 的单位
+2. 按距离或负载自行分配，逐个 `POST /place?unit=<id>&...`
+
+**这和真人的操作一一对应** —— 玩家也是框选一部分单位、让它们建各自就近的房子，
+而不是把所有单位都指向同一个工地。所以这里**没有**「自动均衡分派」的接口：
+真人也做不到，那是特供。
+
+**怎么让单位变多**：单位必须由工厂生产，`/spawn` 默认被禁用（见上文）：
+
+```
+建 ground-factory（或 air-factory / naval-factory）
+  → 供电（发电机 + power-node 连线，相邻不会自动并网）
+  → POST /config?x=<工厂x>&y=<工厂y>&value=<单位名>     选生产计划
+  → 等它产出（轮询 /factory 的 currentPlan 与进度）
+  → POST /command?action=move&units=<新单位id>&x=&y=     指挥它去工地
+```
+
+工厂只吃它的产线需要的材料，产线选错会一直停着 ——
+`/factory` 会给出 `requirements` 和当前进度，不必猜。
 
 **`config` 会跟着建造计划走**，方块一建好就是配好的，不用再发一次 `/config`。
 

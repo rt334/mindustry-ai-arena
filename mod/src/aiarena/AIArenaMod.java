@@ -70,6 +70,7 @@ public class AIArenaMod extends Mod {
                 AIArena.fogRepushTick();
                 RateTracker.update();
                 StallWatch.update();
+                StallWatch.updatePlans();
                 Commander.tickMoveOrders();
                 ensureAgentPlayersPeriodically();
                 // WS 推送必须在主线程：channelJson 会读 Vars.state / Groups
