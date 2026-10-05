@@ -273,6 +273,9 @@
 | 2 | 钻机往哪几格推货查不到 | **部分已实现**：`Snapshot.java:501` `if (sendsTo == null) sendsTo = drillOutputs(b)`，钻机输出格已塞进 `sendsTo`。仍缺的是「实际生效的 rot」与 footprint 锚点差异的解释。 |
 | 3 | `/queue` 只给数量不给坐标与进度 | **已实现**。`Operations.java:447-483` 每个计划带 `x` / `y` / `block` / `breaking` / `constructing` / `progress` / `stuckSeconds` / `stuckReason` / `hint` —— 坐标、进度、卡住原因都有。复盘那条是旧状态。 |
 | 4 | `/units` 缺「当前在建哪个方块」 | **已实现**。`HttpApi.java:4239` 给 `buildingAt: {x, y, progress, block}`，正是复盘要的那四个字段。 |
+| 5 | 没有增量查询接口 | **确实没做**（`grep` 增量/since 类端点，0 命中）。每步改动都要重拉全量 `/buildings`（后期 250+ 条）对比。 |
+| 8 | `/stalls` / `/diag` 不区分「上游来货不足」与「下游拒收」 | **已实现，而且比复盘要的更细**。`StallWatch.causeOf` 给的是 `starved`（上游没送料，**往上游查**）/ `outputBlocked`（自己满仓、出料侧不收，**往下游查**）/ `outputRefused`（刚堵上，还没满仓）/ `underpowered` / `powerUnconnected` —— 方向都写在注释里了。 |
+| 9 | `place` 出视野返回 HTTP 403 而非 JSON | **与现有代码矛盾，待实机确认**。`Actor.java:72/277/309` 三处都返回带完整消息的 `1005 "target tile is not visible to team X"`，经 `statusFor` 映射成 HTTP 403 **但 body 是 JSON**。复盘作者现场看到的是无 body 的 `HTTP Error 403: Forbidden` —— 可能是旧版本，也可能是另一条走到 `respond(ex, 403, …)` 之前的路径。**别照着复盘直接改**，先实机看一眼 body。 |
 | 6 | `/map` 窗口上限 400 无任何文字 | **已修**。`HttpApi.java:339`：`region too large: <N> tiles, max 4096 — use /map?cursor= for whole-map scan`，实测能拿到完整文案。 |
 | 13 | `ENGINE-NOTES.md` 的 `rot` 编码写反 | **已修**。改为 `1=南(+y) / 3=北(-y)` 并加了勘误说明。 |
 | 14 | 矿机产出公式没进任何文档 | **已完成**。`ENGINE-NOTES.md` §三「矿机」就有：`getDrillTime` / `lastDrillSpeed` / `hardnessDrillMultiplier = 50`、液体加成 `liquidBoostIntensity = 1.6`、`dominantItem` 取 footprint 内**数量最多**的矿种、硬度表。复盘那条是旧状态。 |
@@ -284,9 +287,8 @@
 > 因为我是凭 `grep` 命中数猜的，没读那段文字。
 > **命中 0 能证伪，命中 ≥1 不能证真** —— 判「已实现」必须读内容。
 
-> **本次只核了条目 1 / 2 / 3 / 4 / 6 / 13 / 14 / 16 八条。**
-> 条目 5（增量查询）、7（`/place` 的 config）、8（`/stalls` 区分停机原因）、
-> 9（403 无 body / 视野半径）、10（队列停滞处理）**尚未核对**，
+> **本次核了条目 1 / 2 / 3 / 4 / 5 / 6 / 8 / 9 / 13 / 14 / 16 十一条（其中早已完成或已修的：1 / 3 / 4 / 6 / 8 / 13 / 14）。**
+> 条目 7（`/place` 的 config）、10（队列停滞处理）**尚未核对**，
 > 动手前请先按上面的方法读一遍内容 —— 别凭 `grep` 命中数下结论。
 
 ### 7.9 补进 §六 的边界判定
