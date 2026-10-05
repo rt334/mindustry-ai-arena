@@ -49,14 +49,32 @@ class World:
 
     # ---------------------------------------------------------------- 地图
     def refresh(self):
+        """拉核心周边 R 格的地图。
+
+        `/map` 单次上限 4096 格（61×61=3721 安全，81×81=6561 会被 1004 拒），
+        所以 R>30 时必须分块拉 —— 否则一改半径就炸。
+        """
         R = self.R
-        ts = self.a.map(self.cx - R, self.cy - R, 2 * R + 1, 2 * R + 1)
-        self.g = {(t["x"], t["y"]): t for t in ts}
+        W = 61
+        self.g = {}
+        step = W - 1
+        for oy in range(-R, R + 1, step):
+            for ox in range(-R, R + 1, step):
+                x0, y0 = self.cx + ox, self.cy + oy
+                if x0 < 0 or y0 < 0:
+                    continue
+                w_ = min(W, self.cx + R - x0 + 1)
+                h_ = min(W, self.cy + R - y0 + 1)
+                if w_ <= 0 or h_ <= 0:
+                    continue
+                try:
+                    for t in self.a.map(x0, y0, w_, h_):
+                        self.g[(t["x"], t["y"])] = t
+                except ArenaError:
+                    pass
         self.occupied = set()
         for b in self.a.buildings():
-            n = BLOCK_SIZE.get(b["block"])
-            x, y = b["x"], b["y"]
-            self.occupied.add((x, y))
+            self.occupied.add((b["x"], b["y"]))
         self.planned = set()
 
     def ore(self, p):
