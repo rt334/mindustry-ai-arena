@@ -24,12 +24,22 @@ import java.nio.charset.StandardCharsets;
  *   代价是体积偏大，但对一局几分钟的对战可接受。
  *
  * 记录类型：
- *   {"t":"meta", ...}                                    开局元数据（地图/尺寸/队伍/规则）
- *   {"t":"snap","tick":N,"units":[...],"builds":[...]}   周期快照（单位全量 + 方块增量）
- *   {"t":"ev", ...}                                      事件（来自 EventLog）
- *   {"t":"end", ...}                                     结束标记
+ *   {"t":"meta", ...}    开局元数据：地图名/尺寸/队伍/规则 + **mapData（整张地图）**
+ *   {"t":"snap", ...}    周期快照：units 全量、builds 增量、removed 本帧消失的方块
+ *   {"t":"ev", ...}      事件（来自 EventLog）
+ *   {"t":"end", ...}     结束标记
  *
- * 方块只存增量（首次全量 + 后续变化），因为地图上多数方块长期不变。
+ * 快照三条流的语义**不同**，别混：
+ *   units    每帧全量 —— 单位少（几十个），全量比增量简单且不会漏
+ *   builds   增量 —— 首次全量，之后只写「新增或变化的」
+ *   removed  增量 —— 本帧消失的方块坐标。**必须单独报**：
+ *            builds 只写出现的，拆掉的方块从集合里消失后不会出现在任何记录里，
+ *            回放端会一直画着它
+ *
+ * mapData 也用一维 RLE（行优先展开，[名称, 段长, ...]，null 表示该段什么都没有）。
+ * 实测 veins 图 350x200 = 70000 格：逐格写是 1.38 MB，RLE 后约 230 KB ——
+ * 而整局录像才 300 KB，所以这一步不是可选的优化，是不做就没法用。
+ * 地板细碎（11643 段），矿脉和岩壁成片（分别 2974 / 6770 段）。
  *
  * 线程约定：主线程写。文件 IO 在写入线程上同步做，但因为每条记录都很小、
  * 且快照间隔是秒级，不会影响 tick。
@@ -170,9 +180,29 @@ public final class Recorder {
             bf = false;
             builds.append(new Json.Obj()
                 .put("x", b.x).put("y", b.y).put("team", b.team)
-                .put("block", b.block).put("health", b.health).toString());
+                .put("block", b.block).put("health", b.health)
+                // rot 是画传送带流向、炮塔朝向、工厂出口的唯一依据
+                .put("rot", b.rotation)
+                .toString());
         }
         builds.append(']');
+
+        // 本帧消失的方块。**必须单独报** —— 上面只写「新增或变化的」，
+        // 被拆的方块从 nowBuilds 里消失后不会出现在任何一条记录里，
+        // 回放端会一直画着它。
+        StringBuilder removed = new StringBuilder("[");
+        boolean rf = true;
+        if (buildsPrimed) {
+            for (arc.struct.IntSet.IntSetIterator it = knownBuilds.iterator(); it.hasNext; ) {
+                int key = it.next();
+                if (nowBuilds.contains(key)) continue;
+                if (!rf) removed.append(',');
+                rf = false;
+                removed.append('[').append(key / 100000).append(',')
+                       .append(key % 100000).append(']');
+            }
+        }
+        removed.append(']');
 
         boolean fullBuilds = !buildsPrimed;
         knownBuilds.clear();
@@ -185,6 +215,7 @@ public final class Recorder {
             .put("full", fullBuilds)
             .putRaw("units", units.toString())
             .putRaw("builds", builds.toString())
+            .putRaw("removed", removed.toString())
             .toString());
         snapshotCount++;
     }
@@ -205,6 +236,122 @@ public final class Recorder {
         }
     }
 
+    /**
+     * 地图的静态部分 —— 录像里原本完全没有它，回放端只能画一片黑底上的点。
+     *
+     * 70000 格逐个存会爆 —— 实测全图 walls 44658 格（占 64%）、ores 4994 格，
+     * 逐格写成 JSON 是 1.38 MB，而整局录像才 1.24 MB。地图比录像还大，本末倒置。
+     *
+     * 三样都用一维 RLE（行优先展开）：[名称, 段长, 名称, 段长, ...]
+     * 岩壁和矿脉都是成片的，RLE 之后通常只剩几百段。
+     * 无矿 / 无墙的段用 null 占位。
+     *
+     * 整图扫一遍只在录制开始时做一次，几十毫秒。
+     */
+    private static String mapDataJson() {
+        try {
+            var world = Vars.world;
+            int w = world.width(), h = world.height();
+
+            StringBuilder floors = new StringBuilder("[");
+            StringBuilder ores = new StringBuilder("[");
+            StringBuilder walls = new StringBuilder("[");
+
+            // 三样共用同一套 RLE：名称（或 null）+ 段长
+            String pFloor = null, pOre = null, pWall = null;
+            int rFloor = 0, rOre = 0, rWall = 0;
+            boolean ff = true, of = true, wf = true;
+
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    mindustry.world.Tile t = world.tile(x, y);
+                    if (t == null) continue;
+
+                    String fl = t.floor() == null ? "air" : t.floor().name;
+
+                    String ov = t.overlay() == null ? null : t.overlay().name;
+                    if ("air".equals(ov)) ov = null;
+
+                    mindustry.world.Block bl = t.block();
+                    String wl = (bl != null && bl.isStatic() && bl.solid) ? bl.name : null;
+
+                    if (pFloor != null && fl.equals(pFloor)) rFloor++;
+                    else {
+                        if (pFloor != null) { appendRun(floors, pFloor, rFloor); ff = false; }
+                        pFloor = fl; rFloor = 1;
+                    }
+
+                    if (ov == null ? pOre == null : ov.equals(pOre)) rOre++;
+                    else {
+                        if (pOre != null || rOre > 0) { appendRun(ores, pOre, rOre); of = false; }
+                        pOre = ov; rOre = 1;
+                    }
+
+                    if (wl == null ? pWall == null : wl.equals(pWall)) rWall++;
+                    else {
+                        if (pWall != null || rWall > 0) { appendRun(walls, pWall, rWall); wf = false; }
+                        pWall = wl; rWall = 1;
+                    }
+                }
+            }
+            if (pFloor != null) appendRun(floors, pFloor, rFloor);
+            if (pOre != null || rOre > 0) appendRun(ores, pOre, rOre);
+            if (pWall != null || rWall > 0) appendRun(walls, pWall, rWall);
+            floors.append(']');
+            ores.append(']');
+            walls.append(']');
+
+            // 诊断：三样各多少段、矿样本长什么样
+            AIArena.log("mapData: floors=" + (countRuns(floors) / 2)
+                + " ores=" + (countRuns(ores) / 2)
+                + " walls=" + (countRuns(walls) / 2)
+                + " oreSample=" + firstNonNullName(ores));
+
+            return new Json.Obj()
+                .put("w", w).put("h", h)
+                .putRaw("floors", floors.toString())
+                .putRaw("ores", ores.toString())
+                .putRaw("walls", walls.toString())
+                .toString();
+        } catch (Throwable t) {
+            Log.err("mapDataJson failed", t);
+            return "{}";
+        }
+    }
+
+    /** 数一数字符串里有多少个元素（逗号分隔，用于诊断）。 */
+    private static int countRuns(StringBuilder sb) {
+        int n = 0;
+        for (int i = 0; i < sb.length(); i++) {
+            if (sb.charAt(i) == ',') n++;
+        }
+        return n + 1;
+    }
+
+    /** 取 RLE 里第一个非 null 的名称，用于诊断。 */
+    private static String firstNonNullName(StringBuilder sb) {
+        String s = sb.toString();
+        int i = 0, n = 0;
+        while (true) {
+            int comma = s.indexOf(',', i);
+            if (comma < 0) return "(none)";
+            String tok = s.substring(i, comma).trim();
+            if (!tok.equals("null") && tok.length() > 2) return tok;
+            i = s.indexOf(',', comma + 1);
+            if (i < 0) return "(none)";
+            i++;
+            if (++n > 20000) return "(none)";
+        }
+    }
+
+    /** RLE 的一段。name 为 null 表示「这一段的格子上什么都没有」。 */
+    private static void appendRun(StringBuilder sb, String name, int run) {
+        if (sb.charAt(sb.length() - 1) != '[') sb.append(',');
+        if (name == null) sb.append("null");
+        else sb.append(Json.str(name));
+        sb.append(',').append(run);
+    }
+
     private static String metaLine() {
         StringBuilder teams = new StringBuilder("[");
         boolean first = true;
@@ -220,7 +367,8 @@ public final class Recorder {
         var m = Vars.state.map;
         return new Json.Obj()
             .put("t", "meta")
-            .put("version", 1)
+            .put("version", 2)
+            .putRaw("mapData", mapDataJson())
             .put("map", m == null ? "?" : m.name())
             .put("mapCustom", m != null && m.custom)
             .put("w", Vars.world.width()).put("h", Vars.world.height())
