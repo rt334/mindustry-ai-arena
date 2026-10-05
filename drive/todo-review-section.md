@@ -2,10 +2,13 @@
 
 ## 七、四份实战复盘的未收录项
 
-> 来源：[`reviews/`](reviews/) 下的 DEBUG-LOG.md、FEATURE-REQUESTS.md、REPORT.md、
-> REVIEW-ADDENDUM.md。已在本 TODO 其他章节出现的（`shape=path`、多建造单位、
-> `/flow`、`/intel`、`stuckReason` 取值、失败码统计、reviews 未标注 warp、
-> 产线目标）一律不再重复。
+> 来源：[`../docs/reviews/`](../docs/reviews/) 下的 DEBUG-LOG.md、FEATURE-REQUESTS.md、
+> REPORT.md、REVIEW-ADDENDUM.md。已在本 TODO 其他章节出现的（`shape=path`、
+> 多建造单位、`/flow`、`/intel`、`stuckReason` 取值、失败码统计、
+> reviews 未标注 warp、产线目标）一律不再重复。
+>
+> 注：本文件是 `docs/TODO.md` §七 的存档副本（内容已并入 TODO），
+> 放在 `drive/` 只为留一份生成过程的可追溯记录。
 
 ### 7.1 接口暴露缺失
 
