@@ -946,3 +946,39 @@ pwsh -File live-match.ps1 -NoClient    # 只要服务端和对局
 | 7199 | HTTP 接口 |
 | 7200 | WebSocket |
 | 6567 | Mindustry 游戏协议（TCP + UDP） |
+
+---
+
+## SSE 事件推送
+
+`GET /v1/{agent}/stream?since=<seq>&limit=<n>&seconds=<s>` → `text/event-stream`
+
+DESIGN.md 三处承诺的东西。**与 `/events` 轮询共用同一套游标语义** ——
+`since` / `nextSince` / `cursor_expired`（1006）完全一致，所以客户端从轮询
+切过来不必改状态机。
+
+为什么值得用：轮询要你自己定频率 —— 定高了烧限流配额（实测 700 次裸请求就
+触发 1429，而且与写请求抢同一个令牌桶），定低了漏事件。SSE 让服务端按事件
+发生推送。
+
+事件类型：
+
+| `event:` | 何时来 | `data:` |
+|---|---|---|
+| `hello` | 连上立刻 | `{"since":N,"agent":"beta"}` |
+| `ev` | 每个新事件一条 | 与 `/events` 里 `events[]` 的元素**逐字节相同**（同一个 `toJson()`） |
+| `cursor` | 每批之后 | `{"nextSince":N,"buffered":N}` |
+| `error` | 游标过期 | `{"code":1006,"error":"cursor expired…resync with since=0"}` |
+| `end` | 生存期到 | `{"reason":"lifetime reached","nextSince":N}` |
+| `:hb` | 10 秒无事件 | ——（SSE 注释行，保活，不占序号） |
+
+**约束**：
+
+- `seconds` 有上限（600）且**到点主动收尾**——否则客户端不辞而别时线程会被永久占住
+- 同时在流的连接数上限 **8**，超了回 `503 / 1007`。每个 SSE handler 占一个
+  HTTP 线程，不设限等于给自己开了个拒绝服务的口子
+- 游标过期时**不中断流**，只发一条 `error` 事件并把 `since` 重置为 0 继续
+
+> **验证状态**：实现已编译进 mod，但**尚未在实机上跑过**。
+> 按当前轮次的要求没有启动游戏，所以表格里的行为是按代码写的，
+> 不是实测的。第一次实机验证前请把它当「待验」看。

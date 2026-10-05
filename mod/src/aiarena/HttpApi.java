@@ -151,6 +151,7 @@ public final class HttpApi {
                 case "command"   -> handleCommand(ex, agent);
                 case "control"   -> handleControl(ex, agent);
                 case "events"    -> handleEvents(ex, agent);
+                case "stream"    -> handleStream(ex, agent);
                 case "spawn"     -> handleSpawn(ex, agent);
                 case "factory"   -> handleFactory(ex, agent);
                 case "mine"      -> handleMine(ex, agent);
@@ -2879,6 +2880,97 @@ public final class HttpApi {
             .put("buffered", EventLog.size())
             .putRaw("events", arr.toString())
             .toString()));
+    }
+
+
+    /** 同时在流的 SSE 连接数上限。每个 handler 占一个 HTTP 线程。 */
+    private static final java.util.concurrent.atomic.AtomicInteger liveStreams =
+        new java.util.concurrent.atomic.AtomicInteger();
+    private static final int MAX_LIVE_STREAMS = 8;
+
+    /**
+     * SSE 事件推送（DESIGN.md 41/731/853）。
+     *
+     * GET /v1/{agent}/stream?since=<seq>&limit=<n>&seconds=<s>
+     *
+     * 与 /events 轮询**共用同一套游标语义** —— since / nextSince /
+     * cursor_expired(1006) 完全一致，所以客户端从轮询切过来不必改状态机。
+     *
+     * 事件的 JSON 直接复用 EventLog.Ev.toJson()，不另写一份序列化 ——
+     * 两份序列化迟早会漂移，而 SSE 与轮询说的必须是同一件事。
+     */
+    private static void handleStream(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+        long since = p.getLong("since", 0L);
+        int limit = Math.min(Math.max(p.getInt("limit", 256), 1), 1024);
+        double seconds = Math.max(1.0, Math.min(p.getFloat("seconds", 60f), 600f));
+
+        int live = liveStreams.incrementAndGet();
+        if (live > MAX_LIVE_STREAMS) {
+            liveStreams.decrementAndGet();
+            respond(ex, 503, Json.error(1007, "too many live streams (" + MAX_LIVE_STREAMS
+                + " max); use /events polling instead"));
+            return;
+        }
+
+        Team team = agent.team();
+        Params vp = Params.of(ex);
+        int viewId = resolveView(agent, vp);
+        Team viewer = viewId < 0 ? null : Team.get(viewId);
+
+        java.io.OutputStream os = null;
+        try {
+            ex.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
+            ex.getResponseHeaders().set("Cache-Control", "no-cache");
+            ex.sendResponseHeaders(200, 0);          // 0 = chunked，长度未知
+            os = ex.getResponseBody();
+
+            send(os, ":ok\n\n");
+            send(os, "event: hello\ndata: {\"since\":" + since
+                + ",\"agent\":" + Json.str(agent.id) + "}\n\n");
+
+            long deadline = System.currentTimeMillis() + (long) (seconds * 1000);
+            long lastBeat = System.currentTimeMillis();
+
+            while (System.currentTimeMillis() < deadline) {
+                // 游标过期：和轮询同样回 1006，并提示 resync —— 只是走流内事件
+                if (EventLog.cursorExpired(since)) {
+                    send(os, "event: error\ndata: {\"code\":1006,\"error\":"
+                        + Json.str("cursor expired: events before seq " + since
+                            + " have been discarded; resync with since=0") + "}\n\n");
+                    since = 0;
+                }
+
+                var evs = EventLog.since(since, limit, viewer);
+                if (evs.size > 0) {
+                    for (int i = 0; i < evs.size; i++) {
+                        var ev = evs.get(i);
+                        send(os, "event: ev\ndata: " + ev.toJson() + "\n\n");
+                        if (ev.seq > since) since = ev.seq;
+                    }
+                    send(os, "event: cursor\ndata: {\"nextSince\":" + since
+                        + ",\"buffered\":" + EventLog.size() + "}\n\n");
+                    lastBeat = System.currentTimeMillis();
+                } else if (System.currentTimeMillis() - lastBeat > 10_000) {
+                    send(os, ":hb\n\n");             // 保活，不占序号
+                    lastBeat = System.currentTimeMillis();
+                }
+                Thread.sleep(120);                   // 采样间隔，不是「等待」
+            }
+            send(os, "event: end\ndata: {\"reason\":\"lifetime reached\","
+                + "\"nextSince\":" + since + "}\n\n");
+        } catch (Throwable t) {
+            // 客户端断开是常态，不记日志
+        } finally {
+            liveStreams.decrementAndGet();
+            try { if (os != null) os.close(); } catch (Throwable ignored) { }
+            try { ex.close(); } catch (Throwable ignored) { }
+        }
+    }
+
+    private static void send(java.io.OutputStream os, String s) throws java.io.IOException {
+        os.write(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        os.flush();
     }
 
     /**
