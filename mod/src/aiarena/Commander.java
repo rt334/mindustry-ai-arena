@@ -288,6 +288,13 @@ public final class Commander {
      * rotation 掰向目标，并直接覆写 vel。
      */
     public static Actor.Result warp(Team team, int unitId, float tx, float ty) {
+        // 默认禁止：这是直接改坐标的瞬移，人类只能 WASD。
+        // 详见 AIArena.ALLOW_WARP 的说明。
+        if (!AIArena.ALLOW_WARP) {
+            return err(1005, "direct position setting is disabled: unit movement must go "
+                + "through the engine (use /command?action=move). "
+                + "Server-side override: -Darena.allowwarp=true");
+        }
         Unit u = Groups.unit.getByID(unitId);
         if (u == null) return err(1002, "unit id " + unitId + " not found");
         if (u.team != team) return err(1005, "unit belongs to " + u.team.name);

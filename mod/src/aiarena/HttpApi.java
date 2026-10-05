@@ -122,6 +122,13 @@ public final class HttpApi {
                 return;
             }
 
+            // 限流在鉴权之后、路由之前：过不了鉴权的请求不该消耗配额。
+            if (!AIArena.takeToken(agent)) {
+                respond(ex, 429, Json.error(1429, "rate limit exceeded: "
+                    + AIArena.ratePerSecond + "/s (burst " + AIArena.rateBurst + ")"));
+                return;
+            }
+
             switch (action) {
                 case "state"  -> handleState(ex, agent);
                 case "map"    -> handleMap(ex, agent);
@@ -4119,6 +4126,7 @@ public final class HttpApi {
             case 1006 -> 410;
             case 1007 -> 504;
             case 1008 -> 409;           // conflict：footprint 被别的建筑或固体地形占住
+            case 1429 -> 429;           // too many requests：令牌桶空了
             default -> 400;
         };
     }

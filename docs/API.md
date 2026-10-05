@@ -496,7 +496,7 @@ progress=0.99  rate=0.70  eta=0
 | `POST /break` | `x` `y` | 拆除 |
 | `POST /config` | `x` `y` … | 设置方块配置 |
 | `POST /command` | `action=` `units=` … | 指挥单位（8 种 action，见下） |
-| `POST /control` | `op=` … | 单位操控。`op` 取值：`pos` `order` `warp` `enter` `release` `fire` `stopmove` `orders` |
+| `POST /control` | `op=` … | 单位操控。`op` 取值：`pos` `order` `enter` `release` `fire` `stopmove` `orders`；**`warp` 默认禁用**（见下） |
 | `POST /spawn` | `type` `x` `y` [`team`] | **默认禁用**，见下 |
 | `POST /mine` | `x` `y` [`unit`] | 让单位挖指定格 |
 | `POST /record` | `action=start\|stop` | 录像开关 |
@@ -588,6 +588,36 @@ seconds   = buildCost / (speed × 60)
 
 默认由**当前接管的单位**执行（`/control?op=enter&unit=<id>` 之后就是它），没有则任选一个可建造单位。
 传 `unit=<id>` 可显式指定。响应里的 `builder` 字段回显实际用了谁。
+
+### `/control?op=warp` 默认被禁用
+
+`warp` **直接改单位坐标**，是 P0 技术验证留下的调试探针。它也是唯一的瞬移后门：
+
+```json
+{"ok":false,"code":1005,"error":"direct position setting is disabled: unit movement must go through the engine (use /command?action=move). Server-side override: -Darena.allowwarp=true"}
+```
+
+**为什么禁**：对等约束里「移动速度 = 引擎行为」——人类玩家只能 WASD，
+而 `warp` 让 AI 一步跨到任意坐标，走位、赶路、规避全都不再成立。
+
+**要移动就用 `/command?action=move`**（或 `/control?op=order`），走引擎的
+`CommandAI`，速度和人类同源。
+
+### 限流
+
+**每个 agent 一个令牌桶**，默认 `60/s`、突发 `200`（`ai-arena.json` 的 `rateLimit`）。
+超限返回 `429` + `code 1429`，响应里写明当前配置：
+
+```json
+{"ok":false,"code":1429,"error":"rate limit exceeded: 60/s (burst 200)"}
+```
+
+限流在**鉴权之后**执行 —— 过不了鉴权的请求不该消耗配额。
+实测连打 900 次：放行 591 次，与「桶 200 + 耗时 6.5s × 60/s ≈ 590」吻合。
+
+> 这条以前是**死配置**：`perSecond`/`burst` 解析了，`1429` 也写在错误码表里，
+> 但没有任何限流逻辑 —— 一个 agent 放开打就能占满 HTTP 线程池。
+> 客户端轮询建议留出余量（比如 5–10 次/秒就够用了）。
 
 ### 多个建造单位
 

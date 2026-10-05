@@ -105,6 +105,55 @@ public final class AIArena {
     public static final boolean ALLOW_DIRECT_SPAWN =
         "true".equalsIgnoreCase(System.getProperty("arena.allowspawn", "false"));
 
+    /**
+     * 是否允许 /control?op=warp —— **直接改单位坐标**。
+     *
+     * 默认禁止。这是 P0 技术验证留下的调试探针（用来观察「服务器改世界之后
+     * 位置会不会被引擎改回去」），但它同时是一条**瞬移后门**：
+     *
+     *   对等约束第 9 条是「移动速度 = 引擎行为」，人类玩家只能 WASD，
+     *   而 warp 让 AI 一步跨到任意坐标 —— 走位、赶路、规避全都不再成立。
+     *
+     * 调试时用 -Darena.allowwarp=true 显式打开。
+     */
+    public static final boolean ALLOW_WARP =
+        "true".equalsIgnoreCase(System.getProperty("arena.allowwarp", "false"));
+
+    // ---------------------------------------------------------------- 限流
+
+    /** 每 agent 的令牌桶。key = agent id。 */
+    private static final java.util.Map<String, Bucket> buckets =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static final class Bucket {
+        double tokens;
+        long lastMs;
+        Bucket(double tokens, long now) { this.tokens = tokens; this.lastMs = now; }
+    }
+
+    /**
+     * 令牌桶限流。超限返回 false（调用方回 429 + code 1429）。
+     *
+     * 动机：配置里的 rateLimit 以前是**死配置** —— 解析了却没人用，
+     * 于是一个 agent 放开打就能占满 HTTP 线程池，把别的 agent 全堵住。
+     *
+     * 用同步块而不是无锁：只有 16 个 HTTP 线程会走到这，争用很低，
+     * 而令牌桶的读改写必须原子。
+     */
+    public static boolean takeToken(Agent agent) {
+        if (agent == null) return true;
+        long now = System.currentTimeMillis();
+        Bucket b = buckets.computeIfAbsent(agent.id, k -> new Bucket(rateBurst, now));
+        synchronized (b) {
+            double elapsed = (now - b.lastMs) / 1000.0;
+            b.lastMs = now;
+            b.tokens = Math.min(rateBurst, b.tokens + elapsed * ratePerSecond);
+            if (b.tokens < 1.0) return false;
+            b.tokens -= 1.0;
+            return true;
+        }
+    }
+
     /** 观战者当前视角队伍 id；-1 表示全图。 */
     public static int viewTeamOf(mindustry.gen.Player pl) {
         if (pl == null) return -1;
