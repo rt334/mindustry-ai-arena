@@ -368,6 +368,9 @@ public final class Recorder {
         return new Json.Obj()
             .put("t", "meta")
             .put("version", 2)
+            // 接口版本：跨版本的成绩不可比，成绩与录像必须带得上它。
+            // 见 docs/API.md「接口版本号」与 docs/DEVELOPING.md「溯源命名」。
+            .put("apiVersion", AIArena.API_VERSION)
             .putRaw("mapData", mapDataJson())
             .put("map", m == null ? "?" : m.name())
             .put("mapCustom", m != null && m.custom)

@@ -98,7 +98,7 @@
 | 一键挑战 | `challenge.py`：拖入 `.cpp` → 跑 `plan/run/rate` → 出排名 | 无 |
 | 零依赖上手 | `start.py` 菜单，「看回放只需要浏览器」 | 起局要 JDK + 脚本，看回放要先做回放 |
 | 多局排名 | Bradley–Terry，`arena/bt.py` 4 KB 纯 Python 可直拷 | 无（见 §六 的理由） |
-| 溯源命名 | bot 目录 `模型@工具#编号`，表格带 SHA-256 | 对局记录不带版本号 |
+| 溯源命名 | bot 目录 `模型@工具#编号`，表格带 SHA-256 | **已做**：录像 `meta` 头加 `apiVersion`（与录像格式的 `version` 是两个东西）；命名约定、`MANIFEST.json` 该有什么、成绩表该带哪两列（`sha256` + `apiVersion`）写进 `DEVELOPING.md`「溯源命名」。 |
 | 条件与事故记录 | `CONDITIONS.md` 四段骨架 | **已建** ✓ 见 [CONDITIONS.md](CONDITIONS.md) |
 
 ### 2.4 上线相关的缺失
