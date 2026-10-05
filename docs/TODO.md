@@ -275,7 +275,7 @@
 | 4 | `/units` 缺「当前在建哪个方块」 | **已实现**。`HttpApi.java:4239` 给 `buildingAt: {x, y, progress, block}`，正是复盘要的那四个字段。 |
 | 7 | `/place` 的 `config` 参数无效 | **已修，而且代码里记着这条教训**。`Actor.java:134-141` 专门把字符串 config 解析成引擎对象，注释写明：`BuildingComp.configured()` 按 `value.getClass()` 查 `block.configurations`，**直接传 String 一律匹配不上，配置会静默失效**（方块建出来了，config 是空的）。正是从复盘那次踩坑学到并修掉的。（同一行的「sorter `rotation` 回读恒 0」是条目 11，仍待实机确认。） |
 | 10 | 队列停滞的处理手段与坐标语义没文档化 | **已文档化**。`API.md` L507 写明「`/control?op=order` 收**格坐标**，实测 `plans` 一次从 56 降到 1，沿线方块真的建成」；L471/L472 的 `stuckReason` 表把 `builderTooFar` 与 `unknown` 两种都指向它；L843 有一段完整流程。 |
-| 5 | 没有增量查询接口 | **确实没做**（`grep` 增量/since 类端点，0 命中）。每步改动都要重拉全量 `/buildings`（后期 250+ 条）对比。 |
+| 5 | 没有增量查询接口 | **能力已有，只是没有专门端点**。`/events?since=` 增量拉、按视野过滤，过滤出 `blockPlace` / `blockBreak` / `blockDestroy` 就是建筑增量的全部。**刻意不另开 `/buildings?since=`**：多一个契约，而且它和事件流回答的必须是同一件事，两份表达迟早漂移。已写进 `API.md`「增量查询」一节，并点明`blockPlace`（世界变了）与 `buildingSpotted`（你看得见了）是两类事。 |
 | 8 | `/stalls` / `/diag` 不区分「上游来货不足」与「下游拒收」 | **已实现，而且比复盘要的更细**。`StallWatch.causeOf` 给的是 `starved`（上游没送料，**往上游查**）/ `outputBlocked`（自己满仓、出料侧不收，**往下游查**）/ `outputRefused`（刚堵上，还没满仓）/ `underpowered` / `powerUnconnected` —— 方向都写在注释里了。 |
 | 9 | `place` 出视野返回 HTTP 403 而非 JSON | **与现有代码矛盾，待实机确认**。`Actor.java:72/277/309` 三处都返回带完整消息的 `1005 "target tile is not visible to team X"`，经 `statusFor` 映射成 HTTP 403 **但 body 是 JSON**。复盘作者现场看到的是无 body 的 `HTTP Error 403: Forbidden` —— 可能是旧版本，也可能是另一条走到 `respond(ex, 403, …)` 之前的路径。**别照着复盘直接改**，先实机看一眼 body。 |
 | 6 | `/map` 窗口上限 400 无任何文字 | **已修**。`HttpApi.java:339`：`region too large: <N> tiles, max 4096 — use /map?cursor= for whole-map scan`，实测能拿到完整文案。 |
