@@ -270,6 +270,8 @@
 |---|---|---|
 | 1 | `acceptsFrom` 没有任何实现 | **已实现**。`Snapshot.java:499` `acceptsFrom = conveyorInputs(b)`，`HttpApi` 用 `if (b.acceptsFrom != null) o.putRaw("acceptsFrom", ...)` 输出。核对时若抽样的第一个建筑是核心（非 conveyor），该字段本就是 null 故不输出，**别据此判定「没实现」** —— 要看带子。 |
 | 2 | 钻机往哪几格推货查不到 | **部分已实现**：`Snapshot.java:501` `if (sendsTo == null) sendsTo = drillOutputs(b)`，钻机输出格已塞进 `sendsTo`。仍缺的是「实际生效的 rot」与 footprint 锚点差异的解释。 |
+| 3 | `/queue` 只给数量不给坐标与进度 | **已实现**。`Operations.java:447-483` 每个计划带 `x` / `y` / `block` / `breaking` / `constructing` / `progress` / `stuckSeconds` / `stuckReason` / `hint` —— 坐标、进度、卡住原因都有。复盘那条是旧状态。 |
+| 4 | `/units` 缺「当前在建哪个方块」 | **已实现**。`HttpApi.java:4239` 给 `buildingAt: {x, y, progress, block}`，正是复盘要的那四个字段。 |
 | 6 | `/map` 窗口上限 400 无任何文字 | **已修**。`HttpApi.java:339`：`region too large: <N> tiles, max 4096 — use /map?cursor= for whole-map scan`，实测能拿到完整文案。 |
 | 13 | `ENGINE-NOTES.md` 的 `rot` 编码写反 | **已修**。改为 `1=南(+y) / 3=北(-y)` 并加了勘误说明。 |
 | 14 | 矿机产出公式没进任何文档 | **已完成**。`ENGINE-NOTES.md` §三「矿机」就有：`getDrillTime` / `lastDrillSpeed` / `hardnessDrillMultiplier = 50`、液体加成 `liquidBoostIntensity = 1.6`、`dominantItem` 取 footprint 内**数量最多**的矿种、硬度表。复盘那条是旧状态。 |
@@ -280,6 +282,11 @@
 > **关于这张表自身的教训**：初版里两条判决是错的（条目 14、16），
 > 因为我是凭 `grep` 命中数猜的，没读那段文字。
 > **命中 0 能证伪，命中 ≥1 不能证真** —— 判「已实现」必须读内容。
+
+> **本次只核了条目 1 / 2 / 3 / 4 / 6 / 13 / 14 / 16 八条。**
+> 条目 5（增量查询）、7（`/place` 的 config）、8（`/stalls` 区分停机原因）、
+> 9（403 无 body / 视野半径）、10（队列停滞处理）**尚未核对**，
+> 动手前请先按上面的方法读一遍内容 —— 别凭 `grep` 命中数下结论。
 
 ### 7.9 补进 §六 的边界判定
 
