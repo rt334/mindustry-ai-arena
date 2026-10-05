@@ -122,6 +122,13 @@ public final class HttpApi {
                 return;
             }
 
+            // 审计：谁、什么时候、要动哪一格。只记会改变世界的动作，
+            // 读接口不记 —— 否则被 /map 刷爆，真出事时反而查不出东西。
+            if (Audit.isMutating(action)) {
+                Audit.log(agentId, agent.team() == null ? -1 : agent.team().id, action,
+                          ex.getRequestURI().getRawQuery(), ex.getRequestMethod());
+            }
+
             // 限流在鉴权之后、路由之前：过不了鉴权的请求不该消耗配额。
             if (!AIArena.takeToken(agent)) {
                 respond(ex, 429, Json.error(1429, "rate limit exceeded: "
@@ -4160,12 +4167,46 @@ public final class HttpApi {
      * 超时是必需的 —— 若主线程因大战场卡住，没有超时会让 HTTP 线程池被占满，
      * 整个接口失去响应；有超时则最多丢几个请求，服务仍可用。
      */
+    /**
+     * 写队列每 tick 的执行预算（DESIGN.md 662「参考 MindustryX 的 1ms」）。
+     *
+     * 没有它时，一批 /place 会把主线程按住不放：那几毫秒本该用来跑对局，
+     * 却被 HTTP 请求吃掉，全场 tick 跟着抖。这是**别人的操作拖慢我**的典型
+     * 来源，竞技场里不可接受。
+     *
+     * 在主线程里计量任务真正执行的时间，按 tick 累计，tick 一变清零。
+     * 预算用完后直接拒（1007），不排队 —— 排队只会让积压更深。
+     */
+    private static long budgetNanos = 1_000_000L;      // 默认 1ms
+    private static long budgetTick = -1L;
+    private static long budgetUsed = 0L;
+
+    public static void setWriteBudgetMillis(double ms) {
+        budgetNanos = (long) (Math.max(0.05, ms) * 1_000_000L);
+    }
+
     private static void postToGame(HttpExchange ex, GameTask task) {
         CompletableFuture<String> future = new CompletableFuture<>();
 
         Core.app.post(() -> {
+            long nowTick;
+            try { nowTick = Vars.state == null ? -1L : (long) Vars.state.tick; }
+            catch (Throwable t) { nowTick = -1; }
+
+            if (nowTick != budgetTick) {          // 新 tick 清零
+                budgetTick = nowTick;
+                budgetUsed = 0L;
+            }
+            if (budgetUsed >= budgetNanos) {
+                future.complete(Json.error(1007, "write queue budget exhausted for tick "
+                    + nowTick + " (" + (budgetNanos / 1_000_000.0) + " ms/tick); retry next tick"));
+                return;
+            }
+
+            long t0 = System.nanoTime();
             try { future.complete(task.run()); }
             catch (Throwable t) { future.complete(Json.error(1500, String.valueOf(t))); }
+            finally { budgetUsed += System.nanoTime() - t0; }
         });
 
         try {

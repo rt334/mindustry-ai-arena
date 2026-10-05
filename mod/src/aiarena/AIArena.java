@@ -446,6 +446,8 @@ public final class AIArena {
             }
 
             log("loaded " + agents.size() + " agent(s), bind=" + bind + ":" + port);
+        Audit.init();
+        writeDiscoveryFiles();
             for (Agent a : agents) log("   " + a);
         } catch (Throwable t) {
             log("config load FAILED: " + t);
@@ -594,5 +596,32 @@ public final class AIArena {
             || "localhost".equalsIgnoreCase(host)
             || "::1".equals(host)
             || "[::1]".equals(host);
+    }
+
+    /**
+     * 端口发现文件 —— DESIGN.md 704-715 要求 `bridge-<agentId>.json`。
+     *
+     * 此前零实现，而且 DESIGN.md 里写死的 `port: 7199` 与可配置端口冲突：
+     * 改了配置之后别人还得去读配置才知道连哪。这个文件就是「实际在哪个端口」
+     * 的唯一答案。
+     *
+     * **不写 token** —— 它只解决「连哪」，不解决「以谁的身份」。
+     * 把凭据塞进固定路径的文件里，等于把钥匙放在门口垫子下。
+     */
+    private static void writeDiscoveryFiles() {
+        try {
+            for (Agent ag : agents) {
+                String base = "http://" + bind + ":" + port + "/v1/" + ag.id;
+                String json = new Json.Obj()
+                    .put("agent", ag.id)
+                    .put("httpPort", port)
+                    .put("httpBase", base)
+                    .toString();
+                Core.files.local("bridge-" + ag.id + ".json").writeString(json);
+            }
+            log("wrote " + agents.size() + " discovery file(s): bridge-<agent>.json");
+        } catch (Throwable t) {
+            log("discovery files failed: " + t);
+        }
     }
 }
