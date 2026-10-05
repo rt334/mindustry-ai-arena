@@ -120,6 +120,8 @@
 | **`/intel` 状态机** | **已定位前置，仍未验通**。实测把 gamma 开到敌方核心 5 格外，周边 31x31 的 `visible=0` —— **gamma 的 fogRadius 是 0**（`ENGINE-NOTES` §二十八：只有 6 个快速飞行单位被显式设为 0，gamma 是其中之一），跑得快但看不见。所以「必须有 fogRadius>0 的单位」这条依赖是真的，链子是 煤+沙 → 硅冶炼厂 → air-factory → `poly`。**当初的判断没错，是我中途想当然以为 gamma 能看见、白试了一轮。** 复现脚本 `drive/verify-intel.py`（它会自己报「前置不成立」）。原始说明：需要单位在敌方核心视野内**连续 10 秒（600 tick）**。它是对等约束里唯一被承认的「刻意偏离」的支撑，**却从没跑通过**。实测各队核心相距 228 格、视野只有 61，开局必然全是 `unknown` |
 | **`/queue?clear=true` 非零清空** | 实测只拿到 `cleared 0` |
 | **60 计划上限的触发分支** | 实测峰值 `plans=49`，没撞到上限 |
+| **`stuckReason` 的 `builderTooFar`** | **已实测**。`drive/bootstrap.py` 在一张新图上布线时，远端的计划全部卡在这个原因上，带具体数字：
+`(298,109) conveyor: builderTooFar: 232px away, buildRange 220`、`(294,128) mechanical-drill: builderTooFar: 325px away, buildRange 220`。**`buildRange = 220px = 27.5 格`** —— 这也直接回答了「建造单位射程是不是被放大过」：**没有**，27.5 格是引擎的常规值（`widenBuilderRange` 已停用，见 AIArena.java 注释）。 |
 | **`cursor_expired`（410）路径** | 事件游标被环形缓冲淘汰时才会走到 |
 
 ### 3.2 只验过一部分
@@ -131,7 +133,7 @@
 | `stuckReason` 的四种取值 | **只有 `unknown` 是实测的** | `missingMaterials` / `tileOccupied` / `builderTooFar` 都没真的造出场景验过 |
 | `shape=path` | L 形拐点 + 45° 斜线补正交 | 真实布线场景（长距离、多拐、避障） |
 | `etaSeconds` | 只在 `scatter`（1.23s 施工）上对过账 | 更长/更短的方块、被卡顿干扰时 |
-| 多建造单位 | 文档写清了「多次带 `unit=` 的 `/place`」 | **从没真的造出第二个建造单位来试** |
+| **多建造单位（前提待澄清）** | **YG 指出：建造是绑定在「玩家控制的单位」上的，所以多几个建造单位也只能一次建一个方块。** 这与代码对得上 —— `/place` 的响应里带 `"builder": {"id": 219, ...}`，计划是分配给**某一个**单位的，不是分配给队伍。所以「多建造单位」这个待办**前提可能是错的**：真正的问题不是「有没有第二个单位」，而是「计划能不能分派给不同的单位、让它们并行建」。**在改接口之前先把这条问清楚**，否则会去实现一个没有收益的功能。 |
 
 ### 3.3 压测未覆盖（[STRESS-TEST.md](STRESS-TEST.md) §6）
 
