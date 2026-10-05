@@ -392,3 +392,13 @@ python skill/scripts/arena.py --agent alpha --token <TOKEN>
 实测教训：`veins` 图上「铜铅硅钛石墨各 +5/s」**不可能同时达成** ——
 硅和石墨都要煤，合计需煤 15/s，而全图煤矿机上限只有 9.79/s。
 这个比大小只需要一行算术，却在铺了十几轮带子之后才做。
+
+## 上手
+
+```
+python start.py          # 菜单
+python start.py check    # 前置检查（缺什么直说）
+python start.py play     # 起局
+python start.py watch    # 起局 + 观战端
+python start.py replay   # 看回放（单文件，零依赖）
+```
