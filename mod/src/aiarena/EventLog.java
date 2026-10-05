@@ -27,7 +27,16 @@ import mindustry.gen.Unit;
 public final class EventLog {
 
     /** 环形缓冲容量。约等于 3～5 分钟的对局事件量。 */
-    private static final int CAPACITY = 4096;
+    /**
+     * 环形缓冲容量。
+     *
+     * 可被 -Darena.eventlog.capacity=N 覆盖 —— 只为**测试游标过期契约**用：
+     * cursorExpired 判定要等缓冲绕一圈（firstSeq 前进）才会成立，而攒满 4096 条
+     * 事件要十几分钟的正常游玩。用小容量复现同一条判定，与契约本身无关。
+     * 生产一律用默认值。
+     */
+    private static final int CAPACITY =
+        Math.max(2, Integer.getInteger("arena.eventlog.capacity", 4096));
 
     public static final class Ev {
         public final long seq;

@@ -10,7 +10,32 @@
 > [TODO.md](docs/TODO.md) 里「接口版本号没有约定」一条。
 
 
-## 接口正确性（2026-10-05）
+## 接口正确性（2026-10-05 · 第二批）
+
+又一轮实测（`drive/verify-commands.py`、`compare-move-order.py`）：
+
+- **`/command?action=move` 回成功但单位纹丝不动。** 同一单位、同一目标：
+  `move` 位移 **0.00 格**，`/control?op=order` 位移 **23.14 格**。原因是
+  `command()` 走 `Call.commandUnits`（喂给 `CommandAI` 的引擎 RPC），而本竞技场
+  每个单位都被影子 Player 持有，玩家持有的单位不理会 AI 指挥。
+  已改为位置类指令额外挂 `moveOrders`（每帧直接写速度，绕过控制器）——
+  复测位移 **22.99 格**。
+- **新增建筑 `id` 字段。** `/command?action=commandBuilding` 要求传 `buildings=`
+  建筑 id，但 `/buildings` 以前根本不暴露 id —— **这个 action 对任何客户端都是死路**。
+- **`/command` 漏传 `units=` 时不再报误导性错误。** 以前回
+  `1002 no valid units for crux`，读起来像「你给的 id 不属于这队」，
+  真实原因往往是参数名写成了单数 `unit=`。现在报
+  `1001 required: units=<id>[,<id>...]`。
+
+顺带验证：
+- **`cursor_expired` 契约**（此前从未跑通）：`since=1` → `410 + code 1006`，
+  消息指明 `resync with since=0`，而 `since=0` 永远可用。
+  为此把 `EventLog.CAPACITY` 做成可用 `-Darena.eventlog.capacity=N` 覆盖 ——
+  攒满 4096 条事件要十几分钟正常游玩，与契约本身无关。
+- **8 种 `/command` action 全部可达**，参数校验齐全（未知 cmd/stance、
+  缺 units、缺 buildings 都给出结构化错误），无 5xx、无空 body。
+
+## 接口正确性（2026-10-05 · 第一批）
 
 四个缺陷由一轮实测查出（`drive/verify-debt-1.py` / `verify-debt-2.py` 可复现）：
 

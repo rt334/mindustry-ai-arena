@@ -288,6 +288,7 @@ print(a.state())                # 已经在局里了，不需要额外的加入�
 |---|---|
 | `x` `y` | **中心坐标**（多格方块取中心，不是左上角） |
 | `team` | 队伍 id |
+| `id` | **建筑唯一 id** —— `/command?action=commandBuilding` 要的就是它 |
 | `block` | 方块名 |
 | `health` / `maxHealth` | 血量 |
 | `enabled` | 是否启用 |
@@ -808,6 +809,22 @@ POST /place?shape=path&path=273,78;278,78;278,82&block=conveyor
 走封装好的 `place_path()`，别直接 `post("place", path=...)`。
 
 ### `/command` 的 8 种 action
+
+**`units=` 是复数、逗号分隔**（`units=219,220`），不是 `unit=`。漏传或写错名字
+会返回 `1001 required: units=<id>[,<id>...]`。
+
+`move` / `attackUnit` / `assistBuilding` / `setCommand` / `setStance` 需要 `units=`；
+`commandBuilding` 需要 `buildings=`（建筑 id 见 `/buildings` 的 `id` 字段）。
+
+> **`move` 的行为说明**：引擎的 `Call.commandUnits` 是喂给 `CommandAI` 的，
+> 而本竞技场里**每个单位都被影子 Player 持有**（`controller=Player#NNN`），
+> 玩家持有的单位不理会 AI 指挥。所以 `move` 现在会额外走 `moveOrders`
+> （每帧直接写速度与朝向，绕过控制器），**它是真的会动的**。
+> `attackUnit` / `assistBuilding` 仍只走引擎 RPC —— 指挥会被记录，
+> 但玩家持有的单位是否执行取决于引擎行为。要移动单位优先用 `move` 或
+> `/control?op=order`。
+
+
 
 | action | 参数 | 作用 |
 |---|---|---|

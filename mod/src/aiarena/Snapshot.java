@@ -190,6 +190,10 @@ public final class Snapshot {
          * 对等性：玩家看得见任何可见建筑的朝向 —— 传送带往哪流、
          * 炮塔朝哪边、工厂从哪边吐单位，全是画在屏幕上的。
          */
+        /** 建筑的唯一 id。**必须暴露** —— /command?action=commandBuilding
+         *  要求传 buildingIds，没有它这个 action 谁都调不了。 */
+        public final int id;
+
         public final int rotation;
         /**
          * 电力满足度 0~1。玩家选中建筑能看到电力条，无条件可见。
@@ -245,13 +249,14 @@ public final class Snapshot {
          */
         public final int[] sendsTo;
 
-        BuildInfo(int x, int y, int team, String block,
+        BuildInfo(int id, int x, int y, int team, String block,
                   float health, float maxHealth, boolean enabled, float efficiency,
                   String[] items, int[] itemAmounts,
                   String[] liquids, float[] liquidAmounts,
                   String config, boolean constructing, float buildProgress,
                   int rotation, float powerStatus, int[] powerLinks,
                   float fogRadius, int[] acceptsFrom, int[] sendsTo) {
+            this.id = id;
             this.x = x; this.y = y; this.team = team; this.block = block;
             this.health = health; this.maxHealth = maxHealth;
             this.enabled = enabled; this.efficiency = efficiency;
@@ -497,7 +502,7 @@ public final class Snapshot {
                 } catch (Throwable ignored) { }
 
                 list.add(new BuildInfo(
-                    b.tileX(), b.tileY(), b.team.id, b.block.name,
+                    b.id, b.tileX(), b.tileY(), b.team.id, b.block.name,
                     b.health, b.maxHealth, b.enabled, b.efficiency,
                     iNames, iAmts, lNames, lVals, cfg, constructing, progress,
                     b.rotation, pstat, plinks, fogR, acceptsFrom, sendsTo));

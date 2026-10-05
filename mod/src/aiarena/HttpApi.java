@@ -2723,6 +2723,14 @@ public final class HttpApi {
      * 引擎对指挥本身没有距离检查，所以单位与目标都必须对己方可见 ——
      * 这是 DESIGN.md 4.6 里唯一必须自行实现的对等约束。
      */
+    /** 哪些 /command action 必须带 units。 */
+    private static boolean unitsRequired(String op) {
+        return switch (op) {
+            case "move", "attackUnit", "assistBuilding", "setCommand", "setStance" -> true;
+            default -> false;
+        };
+    }
+
     private static void handleCommand(HttpExchange ex, AIArena.Agent agent) {
         Params p = Params.of(ex);
         String op = p.get("action", null);
@@ -2735,6 +2743,17 @@ public final class HttpApi {
 
         int[] unitIds = p.getIntArray("units");
         int[] buildingIds = p.getIntArray("buildings");
+
+        // 需要单位的 action：units 为空时给明确提示。
+        // 不能让它落到 Commander 去报「no valid units for <team>」—— 那读起来
+        // 像是「你给的 id 不属于这队」，而真实原因往往只是参数名写成了单数
+        // unit=，或者忘了传。
+        if (unitsRequired(op) && (unitIds == null || unitIds.length == 0)) {
+            respond(ex, 400, Json.error(1001,
+                "required: units=<id>[,<id>...] — 复数参数、逗号分隔；"
+                + "本 action 需要至少一个己方单位"));
+            return;
+        }
         float x = p.getFloat("x", 0f);
         float y = p.getFloat("y", 0f);
         int target = p.getInt("target", -1);
@@ -4070,7 +4089,7 @@ public final class HttpApi {
             lqs.append('}');
 
             Json.Obj o = new Json.Obj()
-                .put("x", b.x).put("y", b.y).put("team", b.team).put("block", b.block)
+                .put("x", b.x).put("y", b.y).put("team", b.team).put("id", b.id).put("block", b.block)
                 .put("health", b.health).put("maxHealth", b.maxHealth)
                 .put("enabled", b.enabled).put("efficiency", b.efficiency)
                 // 朝向：玩家看得见任何可见建筑的朝向（传送带流向、炮塔朝向、工厂出口）

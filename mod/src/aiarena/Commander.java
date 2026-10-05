@@ -115,6 +115,18 @@ public final class Commander {
         for (int i = 0; i < ids.length; i++) ids[i] = units.get(i).id;
 
         mindustry.gen.Call.commandUnits(shadow, ids, buildTarget, unitTarget, posTarget, queue, true);
+
+        // ⚠ 光靠上面那条 RPC 没用。它是喂给 CommandAI 的，而本竞技场里
+        // **每个单位都被影子 Player 持有**（controller=Player#NNN）——
+        // 玩家持有的单位不理会 AI 指挥。实测同目标同单位：
+        //   /command?action=move → 应答成功，位移 0.00 格
+        //   /control?op=order    → 位移 23.14 格
+        // 差别在于 order 走 moveOrders，由 tickMoveOrders 每帧直接改 u.vel
+        // 与朝向，绕过控制器。位置类指令这里额外挂上它。
+        if (kind == TargetKind.position) {
+            long until = System.currentTimeMillis() + 20_000L;
+            for (int id : ids) moveOrders.put(id, new MoveOrder(team, tx, ty, until));
+        }
         return Actor.Result.ok("commanded " + ids.length + " unit(s) to " + kind);
     }
 
