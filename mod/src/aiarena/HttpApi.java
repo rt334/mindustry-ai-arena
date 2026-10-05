@@ -253,6 +253,41 @@ public final class HttpApi {
         if (seeAll) data.put("view", "all");
         else if (myTeam >= 0) data.put("view", Team.get(myTeam).name);
 
+        // 接口自身的上限。写在响应里，免得靠反复试探才知道边界在哪。
+        data.putRaw("limits", new Json.Obj()
+            .put("mapWindowTiles", MAX_MAP_TILES)
+            .put("batchMax", Operations.MAX_BATCH)
+            .put("plansPerUnit", Operations.MAX_PLANS_PER_UNIT)
+            .toString());
+
+        // 视野：每个视野源的位置与半径。fogRadius 才是「能看多远」，
+        // 不是 UnitType.buildRange（那是建造范围）。
+        float maxR = 0f;
+        StringBuilder vs = new StringBuilder("[");
+        boolean vf = true;
+        for (Snapshot.UnitInfo u : s.units) {
+            if (u.team != myTeam && !seeAll) continue;
+            if (u.fogRadius <= 0f) continue;
+            if (u.fogRadius > maxR) maxR = u.fogRadius;
+            if (!vf) vs.append(',');
+            vf = false;
+            vs.append(new Json.Obj().put("kind", "unit").put("id", u.id)
+                .put("x", (int) (u.x / 8f)).put("y", (int) (u.y / 8f))
+                .put("radius", u.fogRadius).toString());
+        }
+        for (Snapshot.BuildInfo b : s.builds) {
+            if (b.team != myTeam && !seeAll) continue;
+            if (b.fogRadius <= 0f) continue;
+            if (b.fogRadius > maxR) maxR = b.fogRadius;
+            if (!vf) vs.append(',');
+            vf = false;
+            vs.append(new Json.Obj().put("kind", "building").put("x", b.x).put("y", b.y)
+                .put("radius", b.fogRadius).toString());
+        }
+        vs.append(']');
+        data.putRaw("vision", new Json.Obj()
+            .put("maxRadius", maxR).putRaw("sources", vs.toString()).toString());
+
         respond(ex, 200, Json.ok(data.toString()));
     }
 
@@ -3908,6 +3943,8 @@ public final class HttpApi {
 
             // 正在建哪一格。轮询这个字段的 progress 就能知道它还要多久、
             // 或者是不是卡住了（progress 长时间不动）。
+            if (u.fogRadius > 0f) o.put("fogRadius", u.fogRadius);
+
             if (u.buildX >= 0) {
                 o.putRaw("buildingAt", new Json.Obj()
                     .put("x", u.buildX).put("y", u.buildY)
@@ -4021,6 +4058,7 @@ public final class HttpApi {
                 o.put("powerLinksHidden", hidden);
             }
 
+            if (b.fogRadius > 0f) o.put("fogRadius", b.fogRadius);
             if (b.config != null) o.put("config", b.config);
             if (b.constructing) o.put("constructing", true).put("buildProgress", b.buildProgress);
 

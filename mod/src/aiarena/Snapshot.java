@@ -139,13 +139,17 @@ public final class Snapshot {
         /** 正在建什么方块；构造中该格可能是 ConstructBlock，所以取计划里的目标。 */
         public final String buildBlock;
 
+        /** 这个单位的视野半径（`u.type.fogRadius`）。 */
+        public final float fogRadius;
+
         UnitInfo(int id, String type, int team, float x, float y,
                  float health, float maxHealth, float rotation, boolean canBuild,
                  String[] stackItems, int[] stackAmounts, int controllerId, String command,
                  boolean shooting, float targetX, float targetY,
                  int targetId, String targetType, int targetTeam,
                  float ammo, int ammoCapacity,
-                 int buildX, int buildY, float buildProgress, String buildBlock) {
+                 int buildX, int buildY, float buildProgress, String buildBlock,
+                 float fogRadius) {
             this.id = id; this.type = type; this.team = team; this.x = x; this.y = y;
             this.health = health; this.maxHealth = maxHealth;
             this.rotation = rotation; this.canBuild = canBuild;
@@ -157,7 +161,9 @@ public final class Snapshot {
             this.ammo = ammo; this.ammoCapacity = ammoCapacity;
             this.buildX = buildX; this.buildY = buildY;
             this.buildProgress = buildProgress; this.buildBlock = buildBlock;
+            this.fogRadius = fogRadius;
         }
+
     }
 
     public static final class BuildInfo {
@@ -220,6 +226,14 @@ public final class Snapshot {
          * 这是**规则**不是**结论**：告诉 AI 这格能从哪边收料，不替它判断
          * 「这条链会不会堵」。
          */
+        /**
+         * 这个建筑的视野半径（`build.fogRadius()`）。
+         *
+         * 对等性：视野范围是玩家能直接看到的东西 —— 屏幕上雾的范围就是它决定的。
+         * 注意这**不是**建造范围（那是 UnitType.buildRange），两回事。
+         */
+        public final float fogRadius;
+
         public final int[] acceptsFrom;
 
         /**
@@ -237,7 +251,7 @@ public final class Snapshot {
                   String[] liquids, float[] liquidAmounts,
                   String config, boolean constructing, float buildProgress,
                   int rotation, float powerStatus, int[] powerLinks,
-                  int[] acceptsFrom, int[] sendsTo) {
+                  float fogRadius, int[] acceptsFrom, int[] sendsTo) {
             this.x = x; this.y = y; this.team = team; this.block = block;
             this.health = health; this.maxHealth = maxHealth;
             this.enabled = enabled; this.efficiency = efficiency;
@@ -248,6 +262,7 @@ public final class Snapshot {
             this.rotation = rotation;
             this.powerStatus = powerStatus;
             this.powerLinks = powerLinks;
+            this.fogRadius = fogRadius;
             this.acceptsFrom = acceptsFrom;
             this.sendsTo = sendsTo;
         }
@@ -380,13 +395,16 @@ public final class Snapshot {
                 }
             } catch (Throwable ignored) { }
 
+            float fogR = 0f;
+            try { fogR = u.type.fogRadius; } catch (Throwable ignored) { }
+
             out[i++] = new UnitInfo(
                 u.id, u.type.name, u.team.id, u.x, u.y,
                 u.health, u.maxHealth, u.rotation, u.canBuild(),
                 stItems, stAmts, ctrl, cmd,
                 shooting, tx, ty, tid, ttype, tteam,
                 u.ammof(), u.type.ammoCapacity,
-                bX, bY, bProg, bBlock);
+                bX, bY, bProg, bBlock, fogR);
         }
         if (i == out.length) return out;
         UnitInfo[] trimmed = new UnitInfo[i];
@@ -468,6 +486,9 @@ public final class Snapshot {
 
                 // 物流接口：这一格能从哪收、往哪推。单独 try —— 判定失败
                 // 不该让整张快照挂掉。
+                float fogR = 0f;
+                try { fogR = b.fogRadius(); } catch (Throwable ignored) { }
+
                 int[] acceptsFrom = null, sendsTo = null;
                 try {
                     acceptsFrom = conveyorInputs(b);
@@ -479,7 +500,7 @@ public final class Snapshot {
                     b.tileX(), b.tileY(), b.team.id, b.block.name,
                     b.health, b.maxHealth, b.enabled, b.efficiency,
                     iNames, iAmts, lNames, lVals, cfg, constructing, progress,
-                    b.rotation, pstat, plinks, acceptsFrom, sendsTo));
+                    b.rotation, pstat, plinks, fogR, acceptsFrom, sendsTo));
             }
         }
         return list.toArray(BuildInfo.class);
