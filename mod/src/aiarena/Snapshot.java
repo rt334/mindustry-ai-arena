@@ -126,12 +126,26 @@ public final class Snapshot {
         public final float ammo;
         public final int ammoCapacity;
 
+        /**
+         * 这个建造单位**当前正在建的那一格**（建造队列的队首）。
+         * -1 表示它没有待办计划。
+         *
+         * 对等性：玩家看得见自己的建造单位在哪、在盖什么、盖到几成
+         * （方块的施工进度条就画在屏幕上）。
+         */
+        public final int buildX, buildY;
+        /** 当前这一格的施工进度 0~1。配合轮询就能算出「还要多久」。 */
+        public final float buildProgress;
+        /** 正在建什么方块；构造中该格可能是 ConstructBlock，所以取计划里的目标。 */
+        public final String buildBlock;
+
         UnitInfo(int id, String type, int team, float x, float y,
                  float health, float maxHealth, float rotation, boolean canBuild,
                  String[] stackItems, int[] stackAmounts, int controllerId, String command,
                  boolean shooting, float targetX, float targetY,
                  int targetId, String targetType, int targetTeam,
-                 float ammo, int ammoCapacity) {
+                 float ammo, int ammoCapacity,
+                 int buildX, int buildY, float buildProgress, String buildBlock) {
             this.id = id; this.type = type; this.team = team; this.x = x; this.y = y;
             this.health = health; this.maxHealth = maxHealth;
             this.rotation = rotation; this.canBuild = canBuild;
@@ -141,6 +155,8 @@ public final class Snapshot {
             this.targetX = targetX; this.targetY = targetY;
             this.targetId = targetId; this.targetType = targetType; this.targetTeam = targetTeam;
             this.ammo = ammo; this.ammoCapacity = ammoCapacity;
+            this.buildX = buildX; this.buildY = buildY;
+            this.buildProgress = buildProgress; this.buildBlock = buildBlock;
         }
     }
 
@@ -350,12 +366,27 @@ public final class Snapshot {
                 }
             }
 
+            // 建造队列的队首就是它下一步要建的格子（BuilderComp 按 plans.first() 推进）
+            int bX = -1, bY = -1;
+            float bProg = 0f;
+            String bBlock = null;
+            try {
+                if (u.plans != null && u.plans.size > 0) {
+                    mindustry.entities.units.BuildPlan bp = u.plans.first();
+                    if (bp != null) {
+                        bX = bp.x; bY = bp.y; bProg = bp.progress;
+                        if (bp.block != null) bBlock = bp.block.name;
+                    }
+                }
+            } catch (Throwable ignored) { }
+
             out[i++] = new UnitInfo(
                 u.id, u.type.name, u.team.id, u.x, u.y,
                 u.health, u.maxHealth, u.rotation, u.canBuild(),
                 stItems, stAmts, ctrl, cmd,
                 shooting, tx, ty, tid, ttype, tteam,
-                u.ammof(), u.type.ammoCapacity);
+                u.ammof(), u.type.ammoCapacity,
+                bX, bY, bProg, bBlock);
         }
         if (i == out.length) return out;
         UnitInfo[] trimmed = new UnitInfo[i];

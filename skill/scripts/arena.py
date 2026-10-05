@@ -180,6 +180,20 @@ class Arena:
     def control(self, op, **kw):
         return self.post("control", op=op, **kw)
 
+    def place_path(self, points, block, config=None, rot=None):
+        """折线布线：传点列，**服务端逐格算朝向**。
+
+        points 形如 [(x1, y1), (x2, y2), ...]，至少两个点。
+        返回里带 rotations —— `[x, y, rot]` 三元组，就是服务端算好的朝向。
+
+        为什么要封装：本方法内部调用的 post(path, **params) 首参名就叫 path，
+        而接口的参数也叫 path，直接 post("place", path=...) 会撞成 TypeError。
+        """
+        spec = ";".join(f"{int(x)},{int(y)}" for (x, y) in points)
+        return self._call("place", {"shape": "path", "path": spec,
+                                    "block": block, "config": config,
+                                    "rot": rot}, "POST")
+
     # ---------------------------------------------------------------- 轮询
 
     @staticmethod

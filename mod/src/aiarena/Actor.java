@@ -131,10 +131,26 @@ public final class Actor {
                               + block.name, e);
         }
 
-        // ---- 约束 4：入队，交给引擎 ----
-        BuildPlan plan = (config == null)
+        // ---- 约束 4：解析 config，再入队 ----
+        //
+        // 必须在这里把字符串解析成引擎对象：BuildingComp.configured() 按
+        // value.getClass() 查 block.configurations，直接传 String 一律匹配不上，
+        // 配置会**静默失效**（方块建出来了，但 config 是空的）。
+        Object resolvedConfig = null;
+        String configWarning = null;
+        if (config != null) {
+            String raw = String.valueOf(config);
+            resolvedConfig = resolveConfigValue(block, raw);
+            if (resolvedConfig instanceof String && !block.configurations.isEmpty()) {
+                configWarning = "config '" + raw + "' was not recognised; " + block.name
+                    + " expects " + block.configurations.keys()
+                    + " — it would silently do nothing";
+            }
+        }
+
+        BuildPlan plan = (resolvedConfig == null)
             ? new BuildPlan(x, y, rotation, block)
-            : new BuildPlan(x, y, rotation, block, config);
+            : new BuildPlan(x, y, rotation, block, resolvedConfig);
 
         // 「转移建造目标」：对同一格重复下单会替换掉原有计划 ——
         // BuilderComp.addBuild 会按 (x,y) 找到旧计划并移除，且若该格已在施工
@@ -168,6 +184,8 @@ public final class Actor {
             extra.put("inheritedProgress", inherited);
         }
         if (mat != null) extra.putRaw("materials", mat.toString());
+        if (resolvedConfig != null) extra.put("config", describeConfig(resolvedConfig));
+        if (configWarning != null) extra.put("configWarning", configWarning);
 
         String verb = previous == null
             ? "queued "
@@ -294,7 +312,14 @@ public final class Actor {
      *   其它             -> 原样传字符串（分拣器之类）
      */
     private static Object resolveConfigValue(Building build, String value) {
-        var configs = build.block.configurations;
+        return resolveConfigValue(build.block, value);
+    }
+
+    /**
+     * 同上，但按**方块定义**解析 —— /place 下单时建筑还不存在，只有 Block。
+     */
+    private static Object resolveConfigValue(Block block, String value) {
+        var configs = block.configurations;
 
         if (configs.containsKey(mindustry.type.UnitType.class)) {
             var ut = Vars.content.unit(value.trim());

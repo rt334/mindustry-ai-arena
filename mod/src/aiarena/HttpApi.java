@@ -402,6 +402,18 @@ public final class HttpApi {
         catch (NumberFormatException e) { return new int[]{0, 0}; }
     }
 
+    /** path 的逐格朝向，压缩成 `[x,y,rot, x,y,rot, ...]` —— 紧凑且够读。 */
+    static String rotationsJson(Operations.PathPlan pp) {
+        StringBuilder s = new StringBuilder("[");
+        for (int i = 0; i < pp.points.size; i++) {
+            if (i > 0) s.append(',');
+            s.append('[').append(pp.points.get(i).x).append(',')
+             .append(pp.points.get(i).y).append(',')
+             .append(pp.rotations.get(i)).append(']');
+        }
+        return s.append(']').toString();
+    }
+
     /**
      * 下单建造。支持单点与批量形状。
      *
@@ -410,6 +422,10 @@ public final class HttpApi {
      * POST /place?shape=area&x1=&y1=&x2=&y2=&block=              实心矩形
      * POST /place?shape=outline&x1=&y1=&x2=&y2=&block=           矩形边框
      * POST /place?shape=circle&x=&y=&radius=&block=              实心圆
+     * POST /place?shape=path&path=x1,y1;x2,y2;...&block=          折线路径
+     *
+     * `shape=path` 与其它形状的区别：**每一格的朝向由服务端按路径走向算**，
+     * 把折线连成一条能流起来的传送带。不用再自己生成坐标再逐格 place。
      *
      * 批量不是「直接改一片世界」—— 每一格都走 Actor.place 的三步校验
      * （可见性 → 建造单位 → addBuild），由引擎决定哪些真的能建。
@@ -448,7 +464,28 @@ public final class HttpApi {
         try { shape = Operations.Shape.valueOf(shapeName.toLowerCase()); }
         catch (IllegalArgumentException e) {
             respond(ex, 400, Json.error(1001, "unknown shape: " + shapeName
-                + " (point|line|rect|area|outline|circle)"));
+                + " (point|line|rect|area|outline|circle|path)"));
+            return;
+        }
+
+        // path 走单独的解析：它的输入是点列，并且逐格朝向由走向推出来
+        if (shape == Operations.Shape.path) {
+            Operations.PathPlan pp = Operations.path(p.get("path", null));
+            if (pp.error != null) {
+                respond(ex, 400, Json.error(1001, pp.error));
+                return;
+            }
+            postToGame(ex, () -> {
+                Actor.Result r = Operations.placeBatch(team, pp.points, pp.rotations,
+                                                       block, rot, config);
+                if (!r.ok) return Json.error(r.code, r.message);
+                return Json.ok(new Json.Obj()
+                    .put("shape", "path")
+                    .put("tiles", pp.points.size)
+                    .putRaw("rotations", rotationsJson(pp))
+                    .put("message", r.message)
+                    .toString());
+            });
             return;
         }
 
@@ -3868,6 +3905,16 @@ public final class HttpApi {
                 .put("health", u.health).put("maxHealth", u.maxHealth)
                 .put("rotation", u.rotation).put("canBuild", u.canBuild)
                 .putRaw("stack", stack.toString());
+
+            // 正在建哪一格。轮询这个字段的 progress 就能知道它还要多久、
+            // 或者是不是卡住了（progress 长时间不动）。
+            if (u.buildX >= 0) {
+                o.putRaw("buildingAt", new Json.Obj()
+                    .put("x", u.buildX).put("y", u.buildY)
+                    .put("progress", u.buildProgress)
+                    .put("block", u.buildBlock == null ? "" : u.buildBlock)
+                    .toString());
+            }
 
             // 开火状态：玩家看得见单位在射击（枪口火光、弹道）
             if (u.shooting) o.put("shooting", true);

@@ -299,12 +299,35 @@ public final class StallWatch {
         return stalledSince.size();
     }
 
+    /**
+     * 停机的直接原因 —— 一句话说清该往上游查还是往下游查。
+     *
+     *   starved        上游没把料送来（缺输入），**往上游查**
+     *   outputBlocked  自己有料且已满仓，出料侧不收 —— **往下游查**
+     *   outputRefused  出料侧不收，但自己还没满仓（刚堵上）
+     *   unknown        其它情况（电力、配方等），看 missing 数组
+     *
+     * 判据：`efficiency == 0` 且满仓 ⇒ 输出路径不通；缺料 ⇒ 输入路径不通。
+     */
+    private static String causeOf(Building b, String kind) {
+        if ("missingInput".equals(kind)) return "starved";
+
+        boolean accepts = sideAccepts(b, b.rotation);
+        if (!accepts) {
+            boolean full = b.block.hasItems && b.items != null
+                && (b.block.itemCapacity <= 0 || b.items.total() >= b.block.itemCapacity);
+            return full ? "outputBlocked" : "outputRefused";
+        }
+        return "unknown";
+    }
+
     private static String entryJson(Building b, Team team, String kind, double secs) {
         return new Json.Obj()
             .put("x", b.tileX()).put("y", b.tileY())
             .put("team", team.name)
             .put("block", b.block.name)
             .put("kind", kind)
+            .put("cause", causeOf(b, kind))
             .put("rotation", b.rotation)
             .putRaw("items", itemsJson(b))
             .put("efficiency", b.efficiency)
