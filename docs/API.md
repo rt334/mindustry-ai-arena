@@ -982,3 +982,61 @@ DESIGN.md 三处承诺的东西。**与 `/events` 轮询共用同一套游标语
 > **验证状态**：实现已编译进 mod，但**尚未在实机上跑过**。
 > 按当前轮次的要求没有启动游戏，所以表格里的行为是按代码写的，
 > 不是实测的。第一次实机验证前请把它当「待验」看。
+
+---
+
+## 蓝图导入 / 导出
+
+```
+GET  /v1/{agent}/blueprint?x=&y=&w=&h=          导出该矩形区域
+POST /v1/{agent}/blueprint?x=&y=&data=<base64>  把蓝图放在 (x,y)
+```
+
+**为什么有用**：这张图**每局重新随机**（矿脉位置全变），所以布局本来没法跨局
+复用。有了它，一局调好的产线可以存下来、下一局搬到新地形上。
+
+### 格式
+
+**我们自己的显式 JSON，不是 Mindustry 的 `.msch` 二进制。**
+
+DESIGN.md 402–426 给的是 `readBase64` → 逐格 `BuildPlan` 那条路。没走它的原因：
+`.msch` 是 base64 包着一段自定义二进制（format 字节 + version + tags + tiles），
+在没有参考实现的情况下照猜写解析器，产出的是「看着像对、其实错位」的东西。
+显式 JSON 可读、可手改、可离线校验，先要可靠再说兼容。
+
+```json
+{"v":1,"w":24,"h":12,"count":37,
+ "blocks":[{"dx":0,"dy":0,"block":"conveyor","rot":0},
+           {"dx":2,"dy":0,"block":"mechanical-drill","rot":0}]}
+```
+
+base64 编码后放进 `data=`。导出返回里带 `format: "ai-arena-blueprint-json/1"`。
+
+### 导出
+
+```json
+{"x":265,"y":118,"w":24,"h":12,"count":37,
+ "data":"eyJ2IjoxLCJ3IjoyNC...",
+ "format":"ai-arena-blueprint-json/1",
+ "message":"exported 37 block(s)"}
+```
+
+多格方块**只在锚点记一次**（否则导入时会重复放）。
+
+### 导入
+
+坐标按 `(dx,dy)` 相对 `x,y` 平移。响应：
+
+```json
+{"placed":35, "skipped":2, "total":37,
+ "firstFailureTile":<编码后的格坐标>,
+ "failureCodes":"(293,120)=1008 (294,120)=1008 ",
+ "message":"blueprint: placed 35/37, skipped 2 (see failureCodes)"}
+```
+
+`skipped` **不是静默丢弃**：每条失败都带错误码与具体格，`failureCodes` 还做了
+长度截断（最多 240 字符）免得响应被刷爆。全部失败时返回 `1005`。
+
+> **验证状态**：已编译进 mod，**尚未在实机上跑过**。按当前轮次要求没有启动
+> 游戏，所以导入/导出的实际行为是按代码写的，不是实测的。
+> 特别是「多格方块只记锚点」这条，只做了静态推理，没验过。

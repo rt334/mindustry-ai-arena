@@ -152,6 +152,7 @@ public final class HttpApi {
                 case "control"   -> handleControl(ex, agent);
                 case "events"    -> handleEvents(ex, agent);
                 case "stream"    -> handleStream(ex, agent);
+                case "blueprint" -> handleBlueprint(ex, agent);
                 case "spawn"     -> handleSpawn(ex, agent);
                 case "factory"   -> handleFactory(ex, agent);
                 case "mine"      -> handleMine(ex, agent);
@@ -2882,6 +2883,131 @@ public final class HttpApi {
             .toString()));
     }
 
+
+
+    /**
+     * 蓝图导入 / 导出。
+     *
+     *   GET  /v1/{agent}/blueprint?x=&y=&w=&h=        导出该矩形区域
+     *   POST /v1/{agent}/blueprint?x=&y=&data=<base64> 把蓝图放在 (x,y)
+     *
+     * 格式是我们自己的显式 JSON（见本文件顶部说明与 API.md），
+     * **不是 Mindustry 的 .msch 二进制** —— 后者在没有参考实现的情况下
+     * 照猜写解析器，产出的是「看着像对、其实错位」的东西。
+     *
+     * 为什么值得做：这张图每局重新随机，布局本来没法跨局复用。
+     * 有了它，一局调好的产线能存下来、下一局搬到新地形上。
+     */
+    private static void handleBlueprint(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+        Team team = agent.team();
+        if (team == null) { respond(ex, 403, Json.error(1403, "agent has no team")); return; }
+
+        String data = p.get("data", null);
+
+        // ── 导出 ──────────────────────────────────────────────────────
+        if (data == null) {
+            int x = p.getInt("x", Integer.MIN_VALUE);
+            int y = p.getInt("y", Integer.MIN_VALUE);
+            int w = p.getInt("w", 0), h = p.getInt("h", 0);
+            if (x == Integer.MIN_VALUE || y == Integer.MIN_VALUE) {
+                respond(ex, 400, Json.error(1001, "required: x, y, w, h (for export)"));
+                return;
+            }
+            if (w <= 0 || h <= 0 || w * h > MAX_MAP_TILES) {
+                respond(ex, 400, Json.error(1004, "w*h must be in 1.." + MAX_MAP_TILES));
+                return;
+            }
+            postToGame(ex, () -> {
+                StringBuilder blocks = new StringBuilder("[");
+                int n = 0;
+                for (int dy = 0; dy < h; dy++) {
+                    for (int dx = 0; dx < w; dx++) {
+                        var tile = Vars.world.tile(x + dx, y + dy);
+                        if (tile == null || tile.build == null) continue;
+                        // 多格方块只在锚点记一次，否则导入时会重复放
+                        if (tile.build.tileX() != x + dx || tile.build.tileY() != y + dy) continue;
+                        if (n > 0) blocks.append(',');
+                        blocks.append(new Json.Obj()
+                            .put("dx", dx).put("dy", dy)
+                            .put("block", tile.build.block.name)
+                            .put("rot", tile.build.rotation)
+                            .toString());
+                        n++;
+                    }
+                }
+                blocks.append(']');
+                String plain = new Json.Obj()
+                    .put("v", 1).put("w", w).put("h", h).put("count", n)
+                    .putRaw("blocks", blocks.toString()).toString();
+                String b64 = java.util.Base64.getEncoder()
+                    .encodeToString(plain.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                return Json.ok(new Json.Obj()
+                    .put("x", x).put("y", y).put("w", w).put("h", h)
+                    .put("count", n).put("data", b64)
+                    .put("format", "ai-arena-blueprint-json/1")
+                    .put("message", "exported " + n + " block(s)").toString());
+            });
+            return;
+        }
+
+        // ── 导入 ──────────────────────────────────────────────────────
+        int x = p.getInt("x", Integer.MIN_VALUE);
+        int y = p.getInt("y", Integer.MIN_VALUE);
+        if (x == Integer.MIN_VALUE || y == Integer.MIN_VALUE) {
+            respond(ex, 400, Json.error(1001, "required: x, y (top-left anchor for import)"));
+            return;
+        }
+        postToGame(ex, () -> {
+            String plain;
+            try {
+                plain = new String(java.util.Base64.getDecoder().decode(data.trim()),
+                                   java.nio.charset.StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException bad) {
+                return Json.error(1001, "data is not valid base64");
+            }
+            arc.util.serialization.Jval root;
+            try {
+                root = arc.util.serialization.Jval.read(plain);
+            } catch (Throwable t) {
+                return Json.error(1001, "blueprint is not valid JSON: " + t);
+            }
+            var arr = root.get("blocks");
+            if (arr == null || !arr.isArray()) {
+                return Json.error(1001, "blueprint has no blocks[] array");
+            }
+
+            int ok = 0, skipped = 0, firstBad = -1;
+            StringBuilder reasons = new StringBuilder();
+            int idx = 0;
+            for (arc.util.serialization.Jval b : arr.asArray()) {
+                String block = b.getString("block", null);
+                if (block == null) { skipped++; idx++; continue; }
+                int dx = b.getInt("dx", 0), dy = b.getInt("dy", 0);
+                int rot = b.getInt("rot", 0);
+                Actor.Result r = Actor.place(team, x + dx, y + dy, block, rot, null);
+                if (r.ok) {
+                    ok++;
+                } else {
+                    skipped++;
+                    if (firstBad < 0) firstBad = (x + dx) * 100000 + (y + dy);
+                    if (reasons.length() < 240)
+                        reasons.append('(').append(x + dx).append(',').append(y + dy)
+                               .append(")=").append(r.code).append(' ');
+                }
+                idx++;
+            }
+            Json.Obj body = new Json.Obj()
+                .put("placed", ok).put("skipped", skipped).put("total", idx)
+                .put("format", "ai-arena-blueprint-json/1");
+            if (firstBad >= 0) body.put("firstFailureTile", firstBad);
+            if (reasons.length() > 0) body.put("failureCodes", reasons.toString());
+            body.put("message", "blueprint: placed " + ok + "/" + idx
+                + (skipped > 0 ? ", skipped " + skipped + " (see failureCodes)" : ""));
+            return ok > 0 ? Json.ok(body.toString())
+                          : Json.error(1005, "blueprint placed nothing: " + body);
+        });
+    }
 
     /** 同时在流的 SSE 连接数上限。每个 handler 占一个 HTTP 线程。 */
     private static final java.util.concurrent.atomic.AtomicInteger liveStreams =

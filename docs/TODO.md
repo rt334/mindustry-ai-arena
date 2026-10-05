@@ -86,7 +86,7 @@
 | 项 | 来源 | 现状 |
 |---|---|---|
 | SSE 推送 | DESIGN.md 41/731/853 三处写「SSE 推给观察者」 | **已实现（未运行时验证）**：`GET /v1/{agent}/stream?since=&limit=&seconds=`，与轮询共用同一套游标语义、复用 `Ev.toJson()`，带心跳与并发上限。**只验到编译通过** —— 本轮未启游戏，实际行为没跑过。 |
-| 蓝图导入 | DESIGN.md 402–426 给了 `readBase64` → 逐格 `BuildPlan` 的路径 | 18（现 33）个端点里没有 |
+| 蓝图导入 | DESIGN.md 402–426 给了 `readBase64` → 逐格 `BuildPlan` 的路径 | **已实现（未运行时验证），但换了格式**：`GET/POST /v1/{agent}/blueprint`，用我们自己的显式 JSON（base64 装在 `data=` 里），**不是 `.msch` 二进制**——没有参考实现时照猜写解析器，只会产出「看着像对、其实错位」的东西。`.msch` 读取器仍未实现。 |
 | 端口发现文件 | DESIGN.md 704–715 | `bridge-<agentId>.json` 零实现，且与固定的 `port: 7199` 冲突 |
 | 审计日志 | DESIGN.md 684「记录发起者/时间/目标格，供回放与仲裁」 | 只有限流，没有审计 |
 | 写队列每 tick 预算 | DESIGN.md 662 要求「参考 MindustryX 的 1ms」 | 无 |
