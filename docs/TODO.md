@@ -281,7 +281,7 @@
 | 6 | `/map` 窗口上限 400 无任何文字 | **已修**。`HttpApi.java:339`：`region too large: <N> tiles, max 4096 — use /map?cursor= for whole-map scan`，实测能拿到完整文案。 |
 | 13 | `ENGINE-NOTES.md` 的 `rot` 编码写反 | **已修**。改为 `1=南(+y) / 3=北(-y)` 并加了勘误说明。 |
 | 14 | 矿机产出公式没进任何文档 | **已完成**。`ENGINE-NOTES.md` §三「矿机」就有：`getDrillTime` / `lastDrillSpeed` / `hardnessDrillMultiplier = 50`、液体加成 `liquidBoostIntensity = 1.6`、`dominantItem` 取 footprint 内**数量最多**的矿种、硬度表。复盘那条是旧状态。 |
-| 15 | 几条游戏机制没写进文档 | **未做**。但其中「相邻发电机不会自动并网」要写准：**发电机与发电机之间**不会自动互联，而**发电机紧贴用电器**是能直接供电的 —— 实测过（`combustion-generator` 紧贴 `silicon-smelter`，`powerStatus=1.0`），不补 `power-node` 也成立。 |
+| 15 | 几条游戏机制没写进文档 | **已做**（第 13 轮）。`ENGINE-NOTES.md` §二十九 收了三条，第一条按实测做了更准的拆分：**发电机与发电机之间**不会自动互联（要 `power-node`），但**发电机紧贴用电器能直接供电** —— 实测 `combustion-generator` 紧贴 `silicon-smelter` 时 `powerStatus=1.0`，全程没放电力节点。另两条：核心是终端不向下游倒货（钻机贴核心会白送，实测被吃掉 198 煤）；`router` 会被外来货物卡死（`itemCapacity=1`），`junction` 不会。 |
 | 16 | 「5/s 不可达」措辞该改 | **部分**：`PRODUCTION.md` 里「矿脉密度的硬上限」那句已在早先重编号时删掉，但 §五 仍以「可盖矿格数」给出上限（那就是**近处**分析）。复盘点的是：把远矿接回来要 60+ 格干线，而视野只有 61 格、只有**一个**建造单位、还要排队 —— 受支配的是**工程上限**，措辞该往这个方向收。**待改**。 |
 | 18 | 一条该进 §六 明确不做的边界判定 | **已做**。§六 已加入「物流归属判断」一行（结论越线不做），并把同一标准下**可以做**的那条（钻机实际推货格 = 规则）一并写明，见 §7.9。 |
 
