@@ -130,7 +130,7 @@
 |---|---|---|
 | `/command` 的 8 种 action | 只有 `move` | `attackUnit` / `assistBuilding` / `setCommand` / `setStance` / `commandBuilding` / `requestItem` / `transferInventory` |
 | `/control` 的 op | `pos` / `order` / `warp`（拒绝） | `enter` / `release` / `fire` / `stopmove` / `orders` |
-| `stuckReason` 的四种取值 | **三种已实测，一种未验**。`missingMaterials` —— 第 2 轮实测（`shock-mine needs 12 silicon, core has 0`）；`builderTooFar` —— 本轮实测（18 条计划，带像素值与 `buildRange 220`）；`unknown` —— **从没单独测过**（旧记录写成「只有它是实测的」是错的）；`tileOccupied` —— **仍未验**，要构造「下完单之后该格才被别的建筑占掉」的时序。 |
+| `stuckReason` 的四种取值 | **三种已实测，`tileOccupied` 判定为「需敌方抢建才可达」**。`missingMaterials` —— 第 2 轮实测；`builderTooFar` —— 第 29 轮实测（18 条、带像素值）；`unknown` —— 从没单独测过（旧记录写错）；**`tileOccupied` 试过两种绕法都不成**：用「先排 2x2 计划占住目标格、再在目标格排 1x1」构造时序，结果第 2 步直接回 `1008 footprint ... blocked` —— **`validPlace` 会把已排的**计划**也算进占用**，不只算实体建筑。所以己方无法自己造出这个状态；能发生的前提是**敌方在我方已排计划的格上先建成**（敌方校验的是他们自己的计划，我方计划对他们不算占用）。判定：**真实对局里可达，单人局面下不可达**，不作为待办保留。复现尝试见 `drive/verify-tile-occupied.py`。 |
 | `shape=path` | L 形拐点 + 45° 斜线补正交 | 真实布线场景（长距离、多拐、避障） |
 | `etaSeconds` | 只在 `scatter`（1.23s 施工）上对过账 | 更长/更短的方块、被卡顿干扰时 |
 | **多建造单位（前提待澄清）** | **YG 指出：建造是绑定在「玩家控制的单位」上的，所以多几个建造单位也只能一次建一个方块。** 这与代码对得上 —— `/place` 的响应里带 `"builder": {"id": 219, ...}`，计划是分配给**某一个**单位的，不是分配给队伍。所以「多建造单位」这个待办**前提可能是错的**：真正的问题不是「有没有第二个单位」，而是「计划能不能分派给不同的单位、让它们并行建」。**在改接口之前先把这条问清楚**，否则会去实现一个没有收益的功能。 |
