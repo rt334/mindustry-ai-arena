@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI 竞技场 · 回放</title>
+<style>
+:root{color-scheme:dark;--bg:#0f141c;--panel:#18202c;--line:#2a3547;--ink:#e6ecf5;--muted:#93a1b5;
+      font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+*{box-sizing:border-box}body{margin:0;padding:16px;background:var(--bg);color:var(--ink)}
+header{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:baseline;margin-bottom:12px}
+h1{font-size:20px;margin:0}.muted{color:var(--muted);font-size:12px}
+.layout{display:grid;grid-template-columns:minmax(400px,1fr) 320px;gap:14px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
+canvas{width:100%;display:block;border-radius:6px;background:#0a0f16;cursor:crosshair}
+.controls{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px}
+button,select,input{background:#253247;color:var(--ink);border:1px solid #3c4d68;border-radius:6px;
+      padding:6px 9px;font:inherit;font-size:13px}
+button{cursor:pointer}button:hover{background:#30405a}
+input[type=range]{flex:1;min-width:140px;padding:0}
+h2{font-size:13px;color:var(--muted);margin:12px 0 6px}
+#teams,#events{font-size:12px;line-height:1.7;max-height:200px;overflow:auto;white-space:pre-wrap}
+.team{display:flex;justify-content:space-between;gap:8px;padding:5px 7px;border-radius:6px;
+      cursor:pointer;font-size:13px}
+.team:hover,.team.on{background:#243044}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:6px}
+#drop{border:2px dashed var(--line);border-radius:10px;padding:34px;text-align:center;color:var(--muted);
+      cursor:pointer;transition:.15s}
+#drop.hot{border-color:#5ab4ff;color:var(--ink);background:#182534}
+#stats{font-size:12px;color:var(--muted);line-height:1.8}
+@media(max-width:900px){.layout{grid-template-columns:1fr}body{padding:10px}}
+</style></head><body>
+<header><h1>AI 竞技场 · 回放</h1><span class="muted" id="sub">拖一个 .jsonl 进来，或点击选择</span></header>
+
+<div id="loader">
+  <div id="drop">把录像文件拖到这里<br><span style="font-size:12px">（server-run/config/ai-arena-recordings/*.jsonl）</span></div>
+  <input id="file" type="file" accept=".jsonl,.txt" style="display:none">
+</div>
+
+<div class="layout" id="stage" style="display:none">
+  <section class="panel">
+    <canvas id="board"></canvas>
+    <div class="controls">
+      <button id="play">播放</button><button id="prev">◀</button><button id="next">▶</button>
+      <input id="seek" type="range" min="0" value="0"><span id="turn" class="muted"></span>
+      <select id="speed"><option value="1">1×</option><option value="2" selected>2×</option>
+        <option value="4">4×</option><option value="10">10×</option></select>
+      <select id="zoom"><option value="fit">适应窗口</option><option value="1">1×</option>
+        <option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
+    </div>
+    <div class="controls">
+      <select id="keys"><option value="">跳到关键事件…</option></select>
+      <label class="muted"><input type="checkbox" id="showGrid"> 网格</label>
+      <label class="muted"><input type="checkbox" id="follow" checked> 跟随</label>
+    </div>
+  </section>
+  <aside class="panel">
+    <h2>队伍</h2><div id="teams"></div>
+    <h2>本帧事件</h2><div id="events"></div>
+    <h2>统计</h2><div id="stats"></div>
+  </aside>
+</div>
+
+<script>
+'use strict';
+
+// ── 队伍配色 ────────────────────────────────────────────────────────────
+const TEAM_COLORS = { 0:'#8b95a5', 1:'#ff6b7f', 2:'#5ab4ff', 100:'#ff6b7f', 101:'#5ab4ff',
+                      102:'#7bd99b', 103:'#d7a2ff' };
+const teamColor = t => TEAM_COLORS[t] || '#c0c8d4';
+
+// ── 状态 ────────────────────────────────────────────────────────────────
+let R = null;              // { meta, frames[], eventsByTick }
+let map = null;            // { w, h, floor[], ore[], wall[] } 已解码
+let buildings = new Map(); // key -> {x,y,team,block,health,rot}
+let checkpoints = [];      // [{frame, snapshot: Map}] 每 CHECKPOINT_EVERY 帧一份
+let frameIdx = 0, playing = false, lastTick = 0, focusTeam = -1, followCam = true;
+const CHECKPOINT_EVERY = 100;
+
+const $ = id => document.getElementById(id);
+const cv = $('board'), g = cv.getContext('2d');
+
+// ── RLE 解码：[名称, 段长, 名称, 段长, ...] → 展平 ──────────────────────
+function decodeRLE(arr, w, h) {
+  const out = new Array(w * h).fill(null);
+  let p = 0;
+  for (let i = 0; i + 1 < arr.length; i += 2) {
+    const name = arr[i], run = arr[i + 1];
+    for (let k = 0; k < run && p < out.length; k++) out[p++] = name;
+  }
+  return out;
+}
+
+// 地板配色：按名字哈希取一组稳定色，不需要知道具体是哪张图
+const FLOOR_PALETTE = ['#1b2530','#222c38','#1a2a24','#2a241c','#241f2c','#1f2b33','#2b2620','#182028'];
+const floorColorCache = new Map();
+function floorColor(name) {
+  if (floorColorCache.has(name)) return floorColorCache.get(name);
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  const c = FLOOR_PALETTE[h % FLOOR_PALETTE.length];
+  floorColorCache.set(name, c);
+  return c;
+}
+const ORE_COLORS = { 'ore-copper':'#c98a42','ore-lead':'#8f86b4','ore-coal':'#5f6472',
+                     'ore-titanium':'#4fb0c6','ore-thorium':'#b06fa8','ore-scrap':'#7d8494',
+                     'ore-beryllium':'#5aa88a','ore-tungsten':'#7a6f9c',
+                     'ore-crystal-thorium':'#c07fd0','ore-wall-thorium':'#9a5f8a' };
+
+// ── 载入 ────────────────────────────────────────────────────────────────
+async function loadFile(file) {
+  $('sub').textContent = `读取 ${file.name}（${(file.size/1024/1024).toFixed(1)} MB）…`;
+  R = { meta: null, frames: [], events: [] };
+
+  const reader = file.stream().getReader();
+  const dec = new TextDecoder('utf-8');
+  let buf = '', lineNo = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let nl;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line) { lineNo++; handleLine(line, lineNo); }
+    }
+  }
+  if (buf.trim()) handleLine(buf.trim(), ++lineNo);
+
+  finishLoad(file);
+}
+
+function handleLine(line, n) {
+  let j;
+  try { j = JSON.parse(line); } catch (e) { return; }
+  if (j.t === 'meta') {
+    R.meta = j;
+    // 地图只在 meta 里出现一次，立刻解码成扁平数组
+    const md = j.mapData || {};
+    const w = md.w || j.w || 0, h = md.h || j.h || 0;
+    map = {
+      w, h,
+      floor: decodeRLE(md.floors || [], w, h),
+      ore:   decodeRLE(md.ores   || [], w, h),
+      wall:  decodeRLE(md.walls  || [], w, h),
+    };
+    $('sub').textContent = `${j.map} ${w}×${h}`;
+  } else if (j.t === 'snap') {
+    R.frames.push(j);
+  } else if (j.t === 'ev') {
+    R.events.push(j);
+  }
+}
+
+function finishLoad(file) {
+  if (!R.frames.length) { $('sub').textContent = '这个文件里没有快照记录'; return; }
+
+  // 关键帧：每 CHECKPOINT_EVERY 个快照存一份建筑集合的完整副本。
+  // 我们的 builds 是增量，直接从头重放才能得到某一帧的状态；
+  // checkpoint 把「拖到任意位置」从 O(n) 降到 O(100)。
+  checkpoints = [];
+  const cur = new Map();
+  R.frames.forEach((f, i) => {
+    if (i % CHECKPOINT_EVERY === 0) checkpoints.push({ frame: i, snapshot: new Map(cur) });
+    applySnapTo(cur, f);
+  });
+
+  // 关键事件（用于「跳转」下拉）
+  const keys = new Set();
+  for (const ev of R.events) {
+    if (['blockPlace','blockDestroy','unitDestroy','unitCreate','coreDestroy','gameOver'].includes(ev.type)) keys.add(ev.tick);
+  }
+  R.keyTicks = [...keys].sort((a, b) => a - b);
+  R.keyToFrame = new Map();
+  R.keyTicks.forEach(tk => {
+    const i = R.frames.findIndex(f => f.tick >= tk);
+    if (i >= 0) R.keyToFrame.set(tk, i);
+  });
+
+  $('loader').style.display = 'none';
+  $('stage').style.display = '';
+  $('seek').max = R.frames.length - 1;
+  $('turn').textContent = `0 / ${R.frames.length - 1} 帧`;
+
+  const opts = $('keys');
+  opts.length = 1;
+  for (const tk of R.keyTicks.slice(0, 400)) {
+    const o = document.createElement('option');
+    o.value = R.keyToFrame.get(tk);
+    o.textContent = `tick ${tk} · ${R.events.filter(e => e.tick === tk).map(evText)[0] || ''}`;
+    opts.append(o);
+  }
+
+  updateStats(file);
+  go(0);
+  requestAnimationFrame(tick);
+}
+
+function applySnapTo(m, f) {
+  for (const b of (f.builds || [])) {
+    m.set(b.x * 100000 + b.y, b);
+  }
+  for (const [rx, ry] of (f.removed || [])) {
+    m.delete(rx * 100000 + ry);
+  }
+}
+
+// ── 跳到某一帧 ──────────────────────────────────────────────────────────
+function go(i) {
+  playing = false; $('play').textContent = '播放';
+  frameIdx = Math.max(0, Math.min(R.frames.length - 1, i));
+  // 从最近的 checkpoint 重放到目标帧
+  let cp = checkpoints[0];
+  for (const c of checkpoints) { if (c.frame <= frameIdx) cp = c; else break; }
+  buildings = new Map(cp.snapshot);
+  for (let k = cp.frame; k <= frameIdx; k++) applySnapTo(buildings, R.frames[k]);
+  render();
+}
+
+// ── 播放 ────────────────────────────────────────────────────────────────
+function tick(t) {
+  if (playing && t - lastTick >= 120 / +$('speed').value) {
+    lastTick = t;
+    if (frameIdx < R.frames.length - 1) {
+      frameIdx++;
+      let cp = checkpoints[0];
+      for (const c of checkpoints) { if (c.frame <= frameIdx) cp = c; else break; }
+      // 连续播放时用增量推进，不回退到 checkpoint
+      if (frameIdx - 1 !== cp.frame - 1 && frameIdx > 0) {
+        applySnapTo(buildings, R.frames[frameIdx]);
+      }
+      render();
+    } else { playing = false; $('play').textContent = '播放'; }
+  }
+  requestAnimationFrame(tick);
+}
+
+// ── 渲染 ────────────────────────────────────────────────────────────────
+function render() {
+  const f = R.frames[frameIdx];
+  if (!f || !map) return;
+
+  const zoomSel = $('zoom').value;
+  let s;
+  if (zoomSel === 'fit') {
+    const avail = cv.parentElement.clientWidth - 24;
+    s = Math.max(1, Math.floor(Math.min(avail / map.w, 520 / map.h)));
+  } else s = +zoomSel;
+
+  cv.width = map.w * s; cv.height = map.h * s;
+  g.fillStyle = '#0a0f16'; g.fillRect(0, 0, cv.width, cv.height);
+
+  // 1) 地板
+  for (let y = 0; y < map.h; y++) {
+    const row = y * map.w;
+    for (let x = 0; x < map.w; x++) {
+      const fl = map.floor[row + x];
+      if (fl == null) continue;
+      g.fillStyle = floorColor(fl);
+      g.fillRect(x * s, y * s, s, s);
+    }
+  }
+  // 2) 矿（比地板亮一点的小块，只在大格时画）
+  if (s >= 2) {
+    for (let y = 0; y < map.h; y++) {
+      const row = y * map.w;
+      for (let x = 0; x < map.w; x++) {
+        const o = map.ore[row + x];
+        if (!o) continue;
+        g.fillStyle = ORE_COLORS[o] || '#9aa4b2';
+        g.fillRect(x * s, y * s, s, s);
+      }
+    }
+  }
+  // 3) 岩壁
+  g.fillStyle = '#3a4658';
+  for (let y = 0; y < map.h; y++) {
+    const row = y * map.w;
+    for (let x = 0; x < map.w; x++) {
+      if (map.wall[row + x]) g.fillRect(x * s, y * s, s, s);
+    }
+  }
+  // 4) 网格
+  if ($('showGrid').checked && s >= 6) {
+    g.strokeStyle = '#ffffff10'; g.lineWidth = 1;
+    for (let x = 0; x <= map.w; x += 8) { g.beginPath(); g.moveTo(x*s,0); g.lineTo(x*s,cv.height); g.stroke(); }
+    for (let y = 0; y <= map.h; y += 8) { g.beginPath(); g.moveTo(0,y*s); g.lineTo(cv.width,y*s); g.stroke(); }
+  }
+  // 5) 建筑
+  const label = s >= 14;
+  for (const b of buildings.values()) {
+    g.globalAlpha = (focusTeam < 0 || b.team === focusTeam) ? 1 : 0.2;
+    g.fillStyle = teamColor(b.team);
+    g.fillRect(b.x * s, b.y * s, s, s);
+    if (b.rot != null && s >= 6) {          // 朝向：小三角
+      g.fillStyle = '#00000090';
+      const cx = (b.x + .5) * s, cy = (b.y + .5) * s, r = s * .3;
+      const a = [0, Math.PI/2, Math.PI, -Math.PI/2][b.rot & 3];
+      g.beginPath();
+      g.moveTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+      g.lineTo(cx + Math.cos(a + 2.5) * r * .7, cy + Math.sin(a + 2.5) * r * .7);
+      g.lineTo(cx + Math.cos(a - 2.5) * r * .7, cy + Math.sin(a - 2.5) * r * .7);
+      g.closePath(); g.fill();
+    }
+    if (label) {
+      g.fillStyle = '#0b111a'; g.font = `bold ${Math.max(8, s*.5)}px sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText((b.block || '?')[0].toUpperCase(), (b.x + .5) * s, (b.y + .5) * s + 1);
+    }
+  }
+  // 6) 单位
+  for (const u of (f.units || [])) {
+    const t = u.team;
+    g.globalAlpha = (focusTeam < 0 || t === focusTeam) ? 1 : 0.25;
+    const cx = u.x / 8, cy = u.y / 8;
+    g.fillStyle = teamColor(t);
+    g.beginPath(); g.arc(cx * s, cy * s, Math.max(2.5, s * .45), 0, 7); g.fill();
+    g.strokeStyle = '#0b111a'; g.lineWidth = 1; g.stroke();
+    if (s >= 5) {
+      g.fillStyle = '#e6ecf5'; g.font = `${Math.max(8, s*.5)}px sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText((u.type || '?')[0].toUpperCase(), cx * s, cy * s + 1);
+    }
+  }
+  g.globalAlpha = 1;
+
+  // 侧栏
+  $('turn').textContent = `${frameIdx} / ${R.frames.length - 1} 帧 · tick ${f.tick}`;
+  $('seek').value = frameIdx;
+
+  const counts = new Map();
+  for (const b of buildings.values()) counts.set(b.team, (counts.get(b.team) || 0) + 1);
+  const uc = new Map();
+  for (const u of (f.units || [])) uc.set(u.team, (uc.get(u.team) || 0) + 1);
+
+  const teams = [...new Set([...counts.keys(), ...uc.keys()])].sort((a, b) => a - b);
+  $('teams').replaceChildren(...teams.map(t => {
+    const d = document.createElement('div');
+    d.className = 'team' + (focusTeam === t ? ' on' : '');
+    d.onclick = () => { focusTeam = (focusTeam === t) ? -1 : t; render(); };
+    const nm = (R.meta?.teams || []).find(x => x.id === t)?.name || ('team ' + t);
+    d.innerHTML = `<span><span class="sw" style="background:${teamColor(t)}"></span>${nm}</span>`
+      + `<span class="muted">建筑 ${counts.get(t) || 0} · 单位 ${uc.get(t) || 0}</span>`;
+    return d;
+  }));
+
+  const evs = R.events.filter(e => Math.abs(e.tick - f.tick) <= 60);
+  $('events').textContent = evs.length
+    ? evs.map(e => `t${e.tick} ${evText(e)}`).join('\n') : '（这一帧附近没有事件）';
+}
+
+function evText(e) {
+  const d = e.detail || {};
+  switch (e.type) {
+    case 'blockPlace':   return `T${e.team} 建 ${d.block} @(${d.x},${d.y})`;
+    case 'blockDestroy': return `T${e.team} ${d.block} @(${d.x},${d.y}) 被摧毁`;
+    case 'blockBreak':   return `T${e.team} 拆 ${d.block} @(${d.x},${d.y})`;
+    case 'unitCreate':   return `T${e.team} 产出 ${d.type}`;
+    case 'unitDestroy':  return `T${e.team} ${d.type} 阵亡`;
+    case 'coreDestroy':  return `T${e.team} 核心被摧毁`;
+    case 'gameOver':     return `对局结束`;
+    default:             return `${e.type} T${e.team} ${JSON.stringify(d)}`;
+  }
+}
+
+function updateStats(file) {
+  const bytes = file ? file.size : 0;
+  let units = 0, builds = 0, removed = 0;
+  for (const f of R.frames) {
+    units += (f.units || []).length;
+    builds += (f.builds || []).length;
+    removed += (f.removed || []).length;
+  }
+  const md = R.meta?.mapData;
+  const mdBytes = md ? JSON.stringify(md).length : 0;
+  $('stats').innerHTML = [
+    `文件 ${(bytes/1024/1024).toFixed(2)} MB`,
+    `快照 ${R.frames.length} 帧 · 事件 ${R.events.length} 条`,
+    `跨度 tick ${R.frames[0].tick} → ${R.frames[R.frames.length-1].tick}`,
+    `地图 ${(mdBytes/1024).toFixed(0)} KB（一次性）`,
+    `记录 建筑变更 ${builds} · 拆除 ${removed}`,
+    `关键帧 ${checkpoints.length} 份（每 ${CHECKPOINT_EVERY} 帧）`,
+  ].join('<br>');
+}
+
+// ── 交互 ────────────────────────────────────────────────────────────────
+const drop = $('drop'), fileInput = $('file');
+drop.onclick = () => fileInput.click();
+fileInput.onchange = e => { if (e.target.files[0]) loadFile(e.target.files[0]); };
+['dragenter','dragover'].forEach(k => drop.addEventListener(k, e => {
+  e.preventDefault(); drop.classList.add('hot'); }));
+['dragleave','drop'].forEach(k => drop.addEventListener(k, e => {
+  e.preventDefault(); drop.classList.remove('hot'); }));
+drop.addEventListener('drop', e => {
+  const f = e.dataTransfer?.files?.[0];
+  if (f) loadFile(f);
+});
+
+$('play').onclick = () => {
+  if (!R) return;
+  if (frameIdx >= R.frames.length - 1) go(0);
+  playing = !playing; $('play').textContent = playing ? '暂停' : '播放';
+};
+$('prev').onclick = () => go(frameIdx - 1);
+$('next').onclick = () => go(frameIdx + 1);
+$('seek').oninput = e => go(+e.target.value);
+$('keys').onchange = e => { if (e.target.value !== '') go(+e.target.value); };
+$('zoom').onchange = render;
+$('showGrid').onchange = render;
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowRight') go(frameIdx + 1);
+  if (e.key === 'ArrowLeft') go(frameIdx - 1);
+  if (e.key === ' ') { e.preventDefault(); $('play').click(); }
+});
+</script></body></html>
