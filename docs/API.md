@@ -294,25 +294,44 @@ conveyor (283,109) rot=0   acceptsFrom=[[282,109]]         sendsTo=[[284,109]]
 
 | 字段 | 含义 |
 |---|---|
-| `kind` | `beltStall` / `drillBlocked` / `factoryBlocked` / `missingInput` |
+| `kind` | `beltStall` / `drillBlocked` / `factoryBlocked` / `missingInput` / `powerUnconnected` / `powerStarved` |
 | `x` `y` | 出问题的位置 |
 | `item` | 相关物品（有则给出） |
 | `cause` | **一句话说清该往上游查还是往下游查**，见下 |
 
-#### `cause`：两种停机的区分
+#### `cause`：停机该往哪查
 
 | 取值 | 含义 | 往哪查 |
 |---|---|---|
 | `starved` | 上游没把料送来（缺输入） | **上游** |
 | `outputBlocked` | 自己有料且已满仓，出料侧不收 | **下游** |
 | `outputRefused` | 出料侧不收，但自己还没满仓（刚堵上） | 下游 |
-| `unknown` | 其它情况（电力、配方等），看 `missing` | 两者都不是 |
+| `unpowered` | 需要电，但**一根线都没接** | **查电网** |
+| `underpowered` | 接了线，但电力不够（发电机不足 / 链路断） | **查电网** |
+| `unknown` | 其它情况，看 `missing` | 都不像 |
 
 判据：**`efficiency == 0` 且满仓 ⇒ 输出路径不通；缺料 ⇒ 输入路径不通。**
 
-> 这两者以前要靠 `outputAccepts` 和 `missing` 自己拼。典型误判是「核心满了 →
+> 这些以前要靠 `outputAccepts` 和 `missing` 自己拼。典型误判是「核心满了 →
 > 整条上游线回堵 → 上游钻机全部 `eff=0.0` 且满仓」，看着像产线坏了，
 > 其实是**下游吃饱了**。
+
+#### 覆盖范围：只报「看一眼就知道」的
+
+判据和**人类肉眼能看到的**对齐：
+
+| 报 | 为什么 |
+|---|---|
+| `beltStall` | 带子**完全不动** —— 堵死了，一眼可见 |
+| `drillBlocked` | 矿机**不出货**（钻头满仓转不动） |
+| `powerUnconnected` / `powerStarved` | 电力条空 / 连线断，屏幕上直接显示 |
+| `missingInput` | 方块停着；配方要什么、库里有不有，选中就能看 |
+
+**不报**「这条链在减速」「吞吐上限只有 1.2/s」这类 —— 那是**观察 + 推导**得出的，
+游戏界面从不显示，得自己盯一段时间算出来。接口直接给就等于送答案。
+
+同理 `beltStall` 的阈值是引擎的 `clogHeat` 逼近 1（约堵了一秒），
+对应的是「肉眼确认它卡住了」，而不是「它比刚才慢了」。
 
 ### `GET /drill`
 
