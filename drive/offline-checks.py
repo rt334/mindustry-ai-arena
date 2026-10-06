@@ -183,6 +183,19 @@ def source_checks() -> None:
         for c in claims:
             eq(f"{rel} 写死的 jar 条目数（{c}）", int(c), EXPECTED_JAR_ITEMS)
 
+    # --- 死参数扫描（TODO §十一）：读进来但从未使用的请求参数 ---
+    # 这类参数不报错、不告警、返回值也正常，只在语义上骗人 —— 只能靠扫。
+    dp = ROOT / "drive" / "check-dead-params.py"
+    if not dp.exists():
+        rec("死参数扫描", "SKIP", "drive/check-dead-params.py 不存在")
+    else:
+        r = subprocess.run([sys.executable, str(dp)], capture_output=True,
+                           text=True, errors="replace")
+        passed = r.returncode == 0
+        detail = "" if passed else " | ".join(
+            (r.stdout or r.stderr).strip().splitlines()[-3:])
+        rec("死参数扫描（读进来但没用到的参数）", "PASS" if passed else "FAIL", detail)
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="离线断言套件")
