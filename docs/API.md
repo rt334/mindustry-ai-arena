@@ -707,9 +707,34 @@ progress=0.99  rate=0.70  eta=0
 ### `GET /diag`
 
 服务端诊断计数器，含快照路由统计
-`teamBatchSends` `fullViewSends` `spectatorRouted`。
+`teamBatchSends` `fullViewSends` `spectatorRouted`，以及 **`endpointCalls`**。
 
 **仅 admin。** 非 admin 调用返回 HTTP `403`，body 为 `code 1403`。
+
+#### `endpointCalls` —— 谁调了哪些端点、各多少次
+
+```json
+{"<agent>:rates": 41, "<agent>:stalls": 3, "<agent>:buildings": 12, "<agent>:place": 6}
+```
+
+键是 `agentId:action`，按次数从多到少。**默认只给调用方自己的那一份**
+（`agentId:` 前缀匹配）；`canReferee` 的 agent 能看到全部。
+
+**为什么要有它**：审计日志只记**改状态**的操作，于是「AI 到底有没有读 `/stalls`」
+这类问题**从外部无法回答** —— 曾经连续两轮改提示词要求 AI「每轮读 `/stalls`」，
+却始终不知道它是没读、还是读了没照做，只能从结果反推，那就是猜。
+
+有了这个计数，那类问题变成可观测的。几个直接可读的信号：
+
+| 现象 | 说明 |
+|---|---|
+| `stalls` 计数很低而 `place` 很高 | 它只顾着铺新的，**没有巡检** |
+| `queue` 计数远高于其它 | 它在**轮询等建造**，而不是用 `/await` |
+| `await` 计数为 0 | 一次都没用谓词等待原语 |
+| `rates` 计数很低 | 它没在跟踪产率变化 |
+
+> 实测：观察到某一局里 `queue` 的调用次数是 `place` 的**数倍** ——
+> 也就是大部分模型往返花在「问好了没」上。**这个结论在加 `endpointCalls` 之前拿不到。**
 
 ### `GET /content`
 

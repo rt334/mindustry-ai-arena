@@ -101,8 +101,16 @@ public final class HttpApi {
 
     // ---------------------------------------------------------------- routing
 
-    private static void route(HttpExchange ex) {
-        try {
+    /**
+     * 端点调用计数，键是 `agentId:action`。
+     *
+     * **诊断用**：审计日志只记**改状态**的操作，所以「AI 有没有读 `/stalls`」这类问题
+     * 从外部看不到（见 route() 里的说明）。有了它，「它到底读没读警告」变成可观测的。
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<String,
+        java.util.concurrent.atomic.AtomicLong> CALLS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static void route(HttpExchange ex) {        try {
             String path = ex.getRequestURI().getPath();      // /v1/{agent}/{action}
             String[] parts = path.split("/");
             // parts = ["", "v1", agent, action, ...]
@@ -170,9 +178,19 @@ public final class HttpApi {
                 return;
             }
 
+            // 端点调用计数（诊断用，按 agent:action 分组）。
+            //
+            // 为什么需要它：审计日志只记**改状态**的操作，于是「AI 到底看没看 `/stalls`」
+            // 这类问题从外部**无法回答**。实测曾连续两轮改提示词、要求 AI「每轮读 `/stalls`」，
+            // 却始终不知道它是没读、还是读了没照做 —— 只能从结果反推，那就是猜。
+            // 有了这个计数，那一类问题就变成可观测的。
+            try {
+                CALLS.computeIfAbsent(agent.id + ":" + action,
+                        k -> new java.util.concurrent.atomic.AtomicLong()).incrementAndGet();
+            } catch (Throwable ignored) { }
+
             switch (action) {
-                case "state"  -> handleState(ex, agent);
-                case "map"    -> handleMap(ex, agent);
+                case "state"  -> handleState(ex, agent);                case "map"    -> handleMap(ex, agent);
                 case "place"  -> handlePlace(ex, agent);
                 case "batch"  -> handleBatch(ex, agent);
                 case "break"  -> handleBreak(ex, agent);
@@ -2695,6 +2713,10 @@ public final class HttpApi {
                     .put("buildSpeedMultiplier", r.buildSpeedMultiplier)
                     .toString())
                 .putRaw("fogState", fogStateJson())
+                // 各端点被调用了多少次（键是 agentId:action）。
+                // 回答「AI 有没有读 /stalls / /watch / /rates」这类问题 ——
+                // 审计日志只记改状态的操作，看不了这个。
+                .putRaw("endpointCalls", callsJson(agent))
                 .putRaw("players", players.toString())
                 .putRaw("teams", teams.toString())
                 .putRaw("disconnectReasons", Diag.reasonHistogramJson())
@@ -2702,6 +2724,31 @@ public final class HttpApi {
                 .toString());
         });
     }
+    /**
+     * 各端点的调用计数，按次数从多到少。
+     *
+     * 默认只给**调用方自己**的计数（`agent.id:` 前缀）—— 别的 agent 在查什么属于它的
+     * 行为信息，不该无条件广播。裁判/全图角色可以看到全部。
+     */
+    private static String callsJson(AIArena.Agent agent) {
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        java.util.ArrayList<String> keys = new java.util.ArrayList<>(CALLS.keySet());
+        keys.sort((a, b) -> Long.compare(
+            CALLS.getOrDefault(b, ZERO).get(), CALLS.getOrDefault(a, ZERO).get()));
+        for (String k : keys) {
+            boolean mine = k.startsWith(agent.id + ":");
+            if (!mine && !agent.canReferee) continue;
+            if (!first) sb.append(',');
+            first = false;
+            sb.append(Json.str(k)).append(':').append(CALLS.get(k).get());
+        }
+        return sb.append('}').toString();
+    }
+
+    private static final java.util.concurrent.atomic.AtomicLong ZERO =
+        new java.util.concurrent.atomic.AtomicLong();
+
     private static void handleAdmin(HttpExchange ex, AIArena.Agent agent) {
         if (!agent.admin) {
             respond(ex, 403, Json.error(1403, "player administration requires an admin token"));
