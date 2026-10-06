@@ -37,7 +37,7 @@ BUILD_DIR = ROOT / "_work" / "offline-classes"
 
 # ---- 这几个数字一变就要同步：文档（DESIGN §6.1 / README / SKILL）。
 #      收成常量，免得每次加端点都要在好几处改同样的数。----
-EXPECTED_ACTIONS = 36        # route() 里 case 的个数（= /v1/<agent>/<action> 端点数）
+EXPECTED_ACTIONS = 37        # route() 里 case 的个数（= /v1/<agent>/<action> 端点数）
 EXPECTED_JAR_ITEMS = 50      # 1 mod.hjson + 1 MANIFEST.MF + 2 目录项 + 46 class
 EXPECTED_CLASSES = 46
 

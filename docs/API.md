@@ -820,6 +820,7 @@ progress=0.99  rate=0.70  eta=0
 | 接口 | 参数 | 说明 |
 |---|---|---|
 | `POST /place` | `x` `y` `block` [`rot`] [`unit`] [`config`] | 下建造请求（见下方说明） |
+| `POST /batch` | `ops=` | **一批操作** —— 一次请求做多个 place/break/config，省模型往返（见下） |
 | `POST /break` | `x` `y` | 拆除 |
 | `POST /config` | `x` `y` … | 设置方块配置 |
 | `POST /command` | `action=` `units=` … | 指挥单位（8 种 action，见下） |
@@ -831,6 +832,46 @@ progress=0.99  rate=0.70  eta=0
 | `POST /admin` | `action=` … | 管理操作（仅 admin） |
 
 `rot` 取值 0~3（`0=东 1=南 2=西 3=北`）。各 `block` 的参数（尺寸、配方）由 `/content` 在运行时提供。
+
+### `/batch` —— 一次请求做一批操作
+
+**为什么要有它**：参赛 AI 的一次「思考」是一个**模型往返**（秒级到几十秒），而一局只有
+15~30 分钟。如果每次往返只下一个命令，**能做的操作数会被往返延迟硬性卡死** ——
+实测有一局 30 分钟内改了 **181 次**状态（`place` 163 + `break` 18）；
+若一命令一往返、每往返 10 秒，光往返就吃掉了整局。
+
+`shape=` 解决了「同一种方块的一条连续线」，但装不下**一批互不相干的动作**
+（不同方块、不连续的位置、`place` 与 `break` 混在一起）。这个端点补的就是那一段。
+
+```
+POST /v1/{agent}/batch?ops=<动作;动作;...>
+```
+
+每项用 `,` 分隔：
+
+| 动作 | 格式 | 例 |
+|---|---|---|
+| 放置 | `p,x,y,block[,rot]` | `p,285,107,conveyor,0` |
+| 拆除 | `b,x,y` | `b,290,110` |
+| 配置 | `c,x,y,config` | `c,288,109,coal` |
+
+```json
+POST /v1/beta/batch?ops=p,285,107,conveyor,0;p,286,107,conveyor,0;b,290,110
+
+{"ok":true,"data":{
+  "requested":3, "applied":2,
+  "failed":[{"i":2,"op":"b","x":290,"y":110,"code":1002,"error":"no block at (290,110)"}],
+  "message":"batch requested=3 applied=2 failed=1"
+}}
+```
+
+**语义**：
+
+- 整批在**同一次**主线程投递里执行 —— 这才是省往返的关键，不是把 N 个请求并发发出去。
+- **逐条独立**：一条失败不影响其余，**整批仍返回 `200`**，看 `applied` 与 `failed[]`。
+- `failed[]` 带**原始下标 + op + 坐标 + 错误码**，不用去猜是哪条没成。
+- 条数上限 `Operations.MAX_BATCH`（在 `/state` 的 `limits.batchMax`），超了整批拒绝。
+- 格式错就**整批拒绝**（不执行一半）—— 免得留下半截状态。
 
 ### `/place` 响应：材料清单
 

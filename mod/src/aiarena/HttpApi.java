@@ -174,6 +174,7 @@ public final class HttpApi {
                 case "state"  -> handleState(ex, agent);
                 case "map"    -> handleMap(ex, agent);
                 case "place"  -> handlePlace(ex, agent);
+                case "batch"  -> handleBatch(ex, agent);
                 case "break"  -> handleBreak(ex, agent);
                 case "config" -> handleConfig(ex, agent);
                 case "setup"  -> handleSetup(ex, agent);
@@ -588,6 +589,134 @@ public final class HttpApi {
             Json.Obj body = (r.extra == null) ? new Json.Obj() : r.extra;
             body.put("message", r.message).put("shape", shape.name()).put("tiles", pts.size);
             return r.ok ? Json.ok(body.toString()) : Json.error(r.code, r.message, body);
+        });
+    }
+
+    /**
+     * 一批操作：`POST /v1/{agent}/batch?ops=<用 ; 分隔的动作>`
+     *
+     * ## 为什么要有它
+     *
+     * 参赛 AI 的一次「思考」是一个模型往返 —— 秒级到几十秒；而一局只有 15~30 分钟。
+     * 如果每次往返只下一个命令，**能做的操作数被往返延迟硬性卡死**：
+     * 实测有一局 30 分钟内改了 181 次状态（place 163 + break 18），
+     * 若一个命令一个往返、每往返 10 秒，光往返就吃掉了整局。
+     *
+     * `shape=` 解决了「同一种方块的一条连续线」，但装不下**一批互不相干的动作**
+     * （不同方块、不连续的位置、place 与 break 混在一起）。这个端点补的就是那一段。
+     *
+     * ## 格式
+     *
+     * `ops` 用 `;` 分隔，每项用 `,` 分隔：
+     *   `p,x,y,block[,rot]`   放置
+     *   `b,x,y`               拆除
+     *   `c,x,y,config`        配置（sorter 这类要 config 的方块）
+     *
+     * 例：`?ops=p,285,107,conveyor,0;p,286,107,conveyor,0;b,290,110`
+     *
+     * ## 语义
+     *
+     * - 整批在**同一次**主线程投递里执行 —— 这是省往返的关键，不是 N 次投递。
+     * - **逐条独立**：一条失败不影响其余。
+     * - 失败的项进 `failed[]`，带**原始下标 + op + 坐标 + 错误码**，
+     *   别让调用方去猜是哪条没成（这个项目的经验：失败响应体越具体，AI 越少走弯路）。
+     * - 条数上限 `Operations.MAX_BATCH`，超了整批拒绝并说明。
+     */
+    private static void handleBatch(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+        String ops = p.get("ops", null);
+        if (ops == null || ops.trim().isEmpty()) {
+            respond(ex, 400, Json.error(1001,
+                "required: ops=<动作;动作;...>；动作格式 p,x,y,block[,rot] | b,x,y | c,x,y,config"));
+            return;
+        }
+
+        Team team = agent.team();
+        if (team == null) { respond(ex, 403, Json.error(1403, "agent has no team")); return; }
+
+        // 先解析（不进主线程），格式错就整批拒绝 —— 别执行一半
+        String[] raw = ops.split(";");
+        java.util.ArrayList<String[]> parsed = new java.util.ArrayList<>();
+        for (int i = 0; i < raw.length; i++) {
+            String s = raw[i].trim();
+            if (s.isEmpty()) continue;
+            String[] f = s.split(",");
+            String kind = f[0].trim().toLowerCase();
+            boolean okShape = switch (kind) {
+                case "p" -> f.length >= 4;
+                case "b" -> f.length >= 3;
+                case "c" -> f.length >= 4;
+                default -> false;
+            };
+            if (!okShape) {
+                respond(ex, 400, Json.error(1001, "ops[" + i + "] 格式错: " + s
+                    + "（应为 p,x,y,block[,rot] | b,x,y | c,x,y,config）"));
+                return;
+            }
+            parsed.add(f);
+        }
+        if (parsed.isEmpty()) {
+            respond(ex, 400, Json.error(1001, "ops 里没有有效动作"));
+            return;
+        }
+        if (parsed.size() > Operations.MAX_BATCH) {
+            respond(ex, 400, Json.error(1001, "too many ops: " + parsed.size()
+                + " > " + Operations.MAX_BATCH));
+            return;
+        }
+
+        postToGame(ex, () -> {
+            int applied = 0;
+            StringBuilder failed = new StringBuilder("[");
+            boolean firstFail = true;
+            for (int i = 0; i < parsed.size(); i++) {
+                String[] f = parsed.get(i);
+                String kind = f[0].trim().toLowerCase();
+                Actor.Result r;
+                int x = -1, y = -1;
+                try {
+                    switch (kind) {
+                        case "p" -> {
+                            x = Integer.parseInt(f[1].trim());
+                            y = Integer.parseInt(f[2].trim());
+                            String blk = f[3].trim();
+                            int rot = f.length >= 5 ? Integer.parseInt(f[4].trim()) : 0;
+                            r = Actor.place(team, x, y, blk, rot, null, -1);
+                        }
+                        case "b" -> {
+                            x = Integer.parseInt(f[1].trim());
+                            y = Integer.parseInt(f[2].trim());
+                            r = Actor.breakBlock(team, x, y);
+                        }
+                        default -> {
+                            x = Integer.parseInt(f[1].trim());
+                            y = Integer.parseInt(f[2].trim());
+                            r = Actor.configure(team, x, y, f[3].trim());
+                        }
+                    }
+                } catch (Throwable t) {
+                    r = null;
+                }
+                if (r != null && r.ok) {
+                    applied++;
+                } else {
+                    if (!firstFail) failed.append(',');
+                    firstFail = false;
+                    failed.append(new Json.Obj()
+                        .put("i", i).put("op", kind).put("x", x).put("y", y)
+                        .put("code", r == null ? 1500 : r.code)
+                        .put("error", r == null ? "bad op" : r.message).toString());
+                }
+            }
+            failed.append(']');
+
+            Json.Obj body = new Json.Obj()
+                .put("requested", parsed.size())
+                .put("applied", applied)
+                .putRaw("failed", failed.toString())
+                .put("message", "batch requested=" + parsed.size() + " applied=" + applied
+                    + " failed=" + (parsed.size() - applied));
+            return Json.ok(body.toString());
         });
     }
 

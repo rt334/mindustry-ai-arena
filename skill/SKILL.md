@@ -218,6 +218,7 @@ $aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Enco
 | 接口 | 参数 | 说明 |
 |---|---|---|
 | `/place` | `x y block [rot] [config] [unit]` | 下建造请求（排队，须轮询确认）；批量用 `shape=`：`line` `area` `rect` `outline` `circle` `point` `path`。**返回体带 `appliedRot` / `anchorX` / `anchorY` / `size`** —— 多格方块的 `anchorX/Y` 就是它在引擎里的左上角，**算边界直接读它，别自己推 `中心 ± size/2`**。失败时读 `data.conflictAt`（精确冲突格）与 `data.suggestion` |
+| `/batch` | `ops` | **一批操作**（**一次请求做多个 place/break/config**）。格式 `p,x,y,block[,rot]` 或 `b,x,y` 或 `c,x,y,config`，用 `;` 分隔。**一次模型往返只下一个命令，会在往返延迟上把回合烧光** —— 把「一次往返 = 一个意图批次」真正用起来 |
 | `/break` | `x y` | 拆除 |
 | `/config` | `x y value=` | 设置方块配置 |
 | `/command` | `action=...` + `units=` | 指挥单位（8 种 action）：`move` `attackUnit` `assistBuilding` `setCommand` `setStance` `commandBuilding` `requestItem` `transferInventory` |
