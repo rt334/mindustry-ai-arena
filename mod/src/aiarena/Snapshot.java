@@ -185,7 +185,10 @@ public final class Snapshot {
         /** 正在施工时的进度 0~1。 */
         public final float buildProgress;
         /**
-         * 方块朝向 0~3（0=东 1=北 2=西 3=南）。
+         * 方块朝向 0~3（**0=东 1=南 2=西 3=北**，顺时针）。
+         *
+         * 勘误：这里原先写的是「0=东 1=北 2=西 3=南」，**1 与 3 写反了**。
+         * 另外 `Block.rotate == false` 的方块（如 `sorter`）**在引擎里没有朝向**，恒为 0。
          *
          * 对等性：玩家看得见任何可见建筑的朝向 —— 传送带往哪流、
          * 炮塔朝哪边、工厂从哪边吐单位，全是画在屏幕上的。
@@ -244,10 +247,30 @@ public final class Snapshot {
          * 把货推出去的格（Point2.pack）。
          *
          * 传送带 = 正面那一格（不管那里有没有东西，那是它的朝向）。
-         * 钻机 = **所有能接收的邻格** —— 钻机输出不受 rotation 控制，
-         * 所以这里给的是实测结果而不是推导，探针用它脚下占多数的那个矿。
+         *
+         * 钻机 = **候选邻格**：周围**结构上有可能接收**它主产物的格子。
+         *   判据是 `block.consumesItem(主产物)` —— 方块的**静态属性**，不随局面抖。
+         *   因为钻机**不消耗任何物品**，所以另一台钻机**不会**出现在这里；
+         *   而带子 / 核心 / 消耗该物品的工厂会出现。
+         *   （实测动机：不加这层过滤时，钻机的候选里会出现隔壁另一台钻机，
+         *   读起来像"货在往那台钻机推"，而货一丝也过不去。）
+         *
+         * 钻机输出不受 rotation 控制（引擎里就是 `dump()` 向所有邻居推），所以给的不是推导。
+         * 注意这里**不含**「此刻收不收」—— 那是瞬时状态，由读的人结合对方 items 自己判。
          */
         public final int[] sendsTo;
+
+        /** 方块尺寸（1x1 = 1、2x2 = 2、核心 5x5 = 5）。 */
+        public final int size;
+        /**
+         * 覆盖范围的**左上角**（= 中心 − `sizeOffset`，用引擎自己的换算）。
+         *
+         * 为什么要单给：`x` / `y` 是方块的**中心**，多格方块要画边界就得自己减偏移，
+         * 而「中心 ± size/2」是错的 —— 实测：核心 size=5、中心给 (289,104)，
+         * 锚点是 (287,102)。有人按错的算法推了两次边界、整段走廊白建。
+         * **直接读这两个字段，别自己推。**
+         */
+        public final int anchorX, anchorY;
 
         BuildInfo(int id, int x, int y, int team, String block,
                   float health, float maxHealth, boolean enabled, float efficiency,
@@ -255,7 +278,8 @@ public final class Snapshot {
                   String[] liquids, float[] liquidAmounts,
                   String config, boolean constructing, float buildProgress,
                   int rotation, float powerStatus, int[] powerLinks,
-                  float fogRadius, int[] acceptsFrom, int[] sendsTo) {
+                  float fogRadius, int[] acceptsFrom, int[] sendsTo,
+                  int size, int anchorX, int anchorY) {
             this.id = id;
             this.x = x; this.y = y; this.team = team; this.block = block;
             this.health = health; this.maxHealth = maxHealth;
@@ -270,6 +294,8 @@ public final class Snapshot {
             this.fogRadius = fogRadius;
             this.acceptsFrom = acceptsFrom;
             this.sendsTo = sendsTo;
+            this.size = size;
+            this.anchorX = anchorX; this.anchorY = anchorY;
         }
     }
 
@@ -505,7 +531,9 @@ public final class Snapshot {
                     b.id, b.tileX(), b.tileY(), b.team.id, b.block.name,
                     b.health, b.maxHealth, b.enabled, b.efficiency,
                     iNames, iAmts, lNames, lVals, cfg, constructing, progress,
-                    b.rotation, pstat, plinks, fogR, acceptsFrom, sendsTo));
+                    b.rotation, pstat, plinks, fogR, acceptsFrom, sendsTo,
+                    b.block.size,
+                    b.tileX() + b.block.sizeOffset, b.tileY() + b.block.sizeOffset));
             }
         }
         return list.toArray(BuildInfo.class);
@@ -576,15 +604,31 @@ public final class Snapshot {
     }
 
     /**
-     * 只列**有建筑**的方位，不判「此刻能不能收」。
+     * 只列**有建筑**的方位。
      *
-     * 原先这里调的是 `acceptItem`，读数会来回抖：传送带入口被自己身上的货占住时
-     * `minitem <= 0.7`（Conveyor.java:358 的侧面条件），判定立刻变 false，
-     * sendsTo 就空了 —— 而钻机其实一直在往那条带子上推货。实测撞到过：
-     * 带子上明明堆着 2 个铜，sendsTo 却是 null。
+     * ## ⚠ 试过加「结构上能不能收」的过滤，失败了，别重试
      *
-     * 「这台钻机挨着哪几个邻居」是**结构事实**，稳定、可缓存、能拿来布线；
-     * 「此刻这一格收不收」是瞬时状态，要判也该由读的人结合 items 自己判。
+     * **不能用 `block.consumesItem(主产物)`**：它会把**传送带全滤掉** ——
+     * 带子不"消耗"物品、只运输，所以 `consumesItem` 对它恒为 false。
+     * 后果是钻机的 `sendsTo` 变成空数组，比原来"混着另一台钻机"糟得多。
+     * （实测：两台钻机旁边铺了 4 条带子，`sendsTo` 仍是 `[]`。）
+     *
+     * **也不能用 `acceptItem`**：它含「此刻库存满没满」，读数会抖 ——
+     * 传送带入口被自己身上的货占住时（`minitem <= 0.7`，Conveyor.java:358），
+     * 判定立刻变 false，`sendsTo` 就空了，而钻机其实一直在往那条带子上推货。
+     * 实测撞到过：带子上明明堆着 2 个铜，`sendsTo` 却是 null。
+     *
+     * 根因是**没有统一判据**：每类方块「能不能收」的规则都不一样（带子覆写
+     * `acceptItem` 收所有物品、钻机继承默认实现恒为 false、工厂按配方收），
+     * 而能表达它的只有瞬时状态的 `acceptItem`。
+     *
+     * ## 所以这里给的是**结构事实**
+     *
+     * 「这台钻机挨着哪几个邻居」稳定、可缓存、能拿来布线。
+     * 「这一格到底收不收」「货实际往哪流」是**运行时**问题 ——
+     * 快照给不了它，要由读的人结合对方 `items` 的变化自己判。
+     * 这也意味着：`sendsTo` 里出现某个坐标**不等于**货会流到那里
+     * （典型误读：钻机的列表里出现隔壁另一台钻机，而钻机根本不收货）。
      */
     private static void addNeighbour(arc.struct.IntSeq seq, int x, int y) {
         if (Vars.world.build(x, y) == null) return;

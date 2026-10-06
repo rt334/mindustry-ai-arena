@@ -1663,11 +1663,31 @@ public final class HttpApi {
                 .put("hasLiquids", b.hasLiquids)
                 .put("itemCapacity", b.itemCapacity)
                 .put("powerProduction", (b instanceof mindustry.world.blocks.power.PowerGenerator pg2) ? pg2.powerProduction : 0f)
+                .put("powerUse", blockPowerUse(b))
                 .putRaw("requirements", req.toString())
                 .putRaw("inputs", ins.toString())
                 .putRaw("outputs", outs.toString())
                 .toString());
         });
+    }
+
+    /**
+     * 方块的**耗电量**（`/block` 的顶层字段）。
+     *
+     * 为什么必须单给一个：`powerProduction` 只覆盖**发电**方块，而**耗电**方块的消耗量
+     * 只藏在 `inputs` 的 `{"kind":"power","amount":N}` 里。照顶层字段判，会把
+     * 「要 0.5 电」的硅冶炼厂读成「不用电」—— 实测踩过：有人因此白建了一整轮煤沙线。
+     *
+     * 取法与引擎的 `ConsumePower` 同源；这是方块的**静态属性**，不随局面变化。
+     */
+    private static float blockPowerUse(mindustry.world.Block b) {
+        try {
+            if (b.consumers == null) return 0f;
+            for (var c : b.consumers) {
+                if (c instanceof mindustry.world.consumers.ConsumePower cp) return cp.usage;
+            }
+        } catch (Throwable ignored) { }
+        return 0f;
     }
 
     /**
@@ -4565,6 +4585,10 @@ public final class HttpApi {
                 .put("enabled", b.enabled).put("efficiency", b.efficiency)
                 // 朝向：玩家看得见任何可见建筑的朝向（传送带流向、炮塔朝向、工厂出口）
                 .put("rotation", b.rotation)
+                // 尺寸与覆盖范围的左上角。x/y 是**中心**，多格方块要画边界直接读
+                // anchorX/anchorY —— 引擎自己的换算，别按「中心 ± size/2」推（那是错的）。
+                .put("size", b.size)
+                .put("anchorX", b.anchorX).put("anchorY", b.anchorY)
                 .putRaw("items", its.toString())
                 .putRaw("liquids", lqs.toString());
 

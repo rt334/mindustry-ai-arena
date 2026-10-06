@@ -532,9 +532,31 @@ public final class StallWatch {
         return sb.append('}').toString();
     }
 
+    /**
+     * 沿 `dir` 走到**方块外部**的那一格。
+     *
+     * **多格方块必须跳 `size - 1` 格，不是 1 格。** `Building.nearby(dir)` 用的是单格偏移，
+     * 对 2x2 方块来说 `(x+1, y)` 还在它自己身体里 —— 于是 `sideName` 会返回
+     * **方块自己的名字**（实测：`outputSide` 报出等于该方块自己的名字）。
+     *
+     * `dir` 用引擎的 `Geometry.d4` 顺序：0=上 1=右 2=下 3=左（屏幕坐标，y 向下增）。
+     */
+    private static int[] outsideTile(Building b, int dir) {
+        int s = b.block.size;
+        int off = b.block.sizeOffset;
+        int x0 = b.tileX() + off, y0 = b.tileY() + off;
+        switch (dir) {
+            case 0:  return new int[]{x0,     y0 - 1};
+            case 1:  return new int[]{x0 + s, y0};
+            case 2:  return new int[]{x0,     y0 + s};
+            default: return new int[]{x0 - 1, y0};
+        }
+    }
+
     private static String sideName(Building b, int dir) {
         try {
-            Building n = b.nearby(dir);
+            int[] t = outsideTile(b, dir);
+            Building n = Vars.world.build(t[0], t[1]);
             return n == null ? "air" : n.block.name;
         } catch (Throwable t) {
             return "?";
@@ -543,7 +565,8 @@ public final class StallWatch {
 
     private static boolean sideAccepts(Building b, int dir) {
         try {
-            Building n = b.nearby(dir);
+            int[] t = outsideTile(b, dir);
+            Building n = Vars.world.build(t[0], t[1]);
             if (n == null) return false;
             if (b.items != null) {
                 for (Item it : Vars.content.items()) {
