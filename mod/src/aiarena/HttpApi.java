@@ -1571,7 +1571,11 @@ public final class HttpApi {
                          .put("note", "按谓词过滤，静态查不出具体物品");
                 } else if (cons instanceof mindustry.world.consumers.ConsumeLiquid cl) {
                     o = new Json.Obj().put("kind", "liquid")
-                         .put("liquid", cl.liquid.name).put("amount", cl.amount);
+                         .put("liquid", cl.liquid.name).put("amount", cl.amount)
+                         // 引擎自己就把「可选加成」和「必需输入」分开了（ConsumeLiquidBase.booster），
+                         // 只是以前没把这个区分透出来：四台钻机全都列着 water，看起来像非接不可，
+                         // 而实测不接水也 eff=1.0 —— 它是 liquidBoostIntensity 的加成项。
+                         .put("optional", cl.booster);
                 } else if (cons instanceof mindustry.world.consumers.ConsumeLiquids cls) {
                     StringBuilder ls = new StringBuilder("[");
                     boolean f2 = true;
@@ -1581,7 +1585,8 @@ public final class HttpApi {
                         ls.append(new Json.Obj().put("liquid", st.liquid.name).put("amount", st.amount).toString());
                     }
                     ls.append(']');
-                    o = new Json.Obj().put("kind", "liquids").putRaw("liquids", ls.toString());
+                    o = new Json.Obj().put("kind", "liquids").putRaw("liquids", ls.toString())
+                         .put("optional", cls.booster);
                 } else if (cons instanceof mindustry.world.consumers.ConsumePower cp) {
                     o = new Json.Obj().put("kind", "power").put("amount", cp.usage);
                 } else if (cons instanceof mindustry.world.consumers.ConsumePayloads) {
@@ -1664,11 +1669,33 @@ public final class HttpApi {
                 .put("itemCapacity", b.itemCapacity)
                 .put("powerProduction", (b instanceof mindustry.world.blocks.power.PowerGenerator pg2) ? pg2.powerProduction : 0f)
                 .put("powerUse", blockPowerUse(b))
+                .put("drillSpeed", blockDrillSpeed(b))
                 .putRaw("requirements", req.toString())
                 .putRaw("inputs", ins.toString())
                 .putRaw("outputs", outs.toString())
                 .toString());
         });
+    }
+
+    /**
+     * 钻机在**满矿**（footprint 里全是矿）时的理论速率，单位 items/s。
+     *
+     * 取法与引擎的 `Stat.drillSpeed` 同源：`60 / drillTime * size²` ——
+     * **这正是游戏里 tooltip 显示给玩家的那个数字**，所以不越公平线。
+     *
+     * 而 AI 此前拿不到它：`/block` 里四台钻机（机械/气动/激光/爆破）的顶层字段**完全一样**，
+     * 唯一线索是 `outputs` 里的 `tier`，而 tier 只表示「能挖多硬的矿」、**不表示快慢**。
+     * 想比较速度只能各建一台去读 `/drill` 的 `itemsPerSecond` —— 实测有人就是这么绕的。
+     *
+     * 注意它是**满矿理论值**：实际速率还要乘矿种硬度带来的折扣，具体能挖多少看 `/ore` 与 `/drill`。
+     */
+    private static float blockDrillSpeed(mindustry.world.Block b) {
+        try {
+            if (b instanceof mindustry.world.blocks.production.Drill dr) {
+                return dr.drillTime <= 0f ? 0f : 60f / dr.drillTime * dr.size * dr.size;
+            }
+        } catch (Throwable ignored) { }
+        return 0f;
     }
 
     /**

@@ -227,3 +227,9 @@
   换算是 `block.sizeOffset`。
   同时修掉 `drillOutputs` 的 footprint 计算 —— 它以前对 3x3 及以上会偏一格，
   导致 `laser-drill` 的 `sendsTo` 指向错误的邻居。
+
+- **`/block` 补 `drillSpeed` 与 `inputs[].optional`（顶层 `powerUse` 见上一条）。**
+  `drillSpeed` 是满矿理论速率（items/s，取法与引擎 tooltip 的 `Stat.drillSpeed` 同源）——
+  在此之前四台钻机的顶层字段完全一样、**无法横向比快慢**，只能各建一台去读 `/drill`。
+  `optional: true` 标出「有它更快、没它也能干」的输入：四台钻机全都列着 `water`
+  且看着像必需，而实测不接水也 `eff=1.0`。

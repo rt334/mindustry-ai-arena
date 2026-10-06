@@ -764,6 +764,16 @@ progress=0.99  rate=0.70  eta=0
 方块详情。传 `name=<方块名>` 取单个方块的完整定义（含 `details` 说明文案）；
 不传 `name` 则列出**全部可放置且未隐藏**的方块。
 
+**几个容易看漏、但决定布局成败的字段**：
+
+| 字段 | 含义 | 为什么重要 |
+|---|---|---|
+| `drillSpeed` | 钻机在**满矿**（footprint 全是矿）时的理论速率，单位 **items/s** | 四台钻机的其余顶层字段**完全一样**，唯一区别是 `outputs[].tier` —— 而 **tier 只表示「能挖多硬的矿」，不表示快慢**。想横向比速度只有看这一栏（取法与引擎 tooltip 的 `Stat.drillSpeed` 同源：`60/drillTime × size²`）。实际速率还要乘矿种硬度带来的折扣，具体能挖多少看 `/ore` 与 `/drill` |
+| `powerUse` | 耗电（顶层） | `powerProduction` **只覆盖发电方块**；耗电方块以前顶层什么都不给，会让人把要 0.5 电的硅冶炼厂读成「不用电」 |
+| `inputs[].optional` | `true` = **有它更快、没它也能干** | 引擎自己就把「可选加成」和「必需输入」分开了（`ConsumeLiquidBase.booster`）。四台钻机全都列着 `water` 且**看着像非接不可**，而实测不接水也 `eff=1.0` —— 看 `optional` 就不会误判 |
+
+`outputs[].tier` 是**采矿等级**：钻机只能采 `hardness ≤ tier` 的矿（`/ore` 的 `canMine` 就是这个判定的结果）。
+
 ### `GET /maps`
 
 列出引擎里所有地图的**真实属性**，含 `teams` 数量与 PvP 可用性。选图前用它核对，别猜。
