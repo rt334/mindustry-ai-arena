@@ -26,6 +26,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = ROOT / "skill"
+DEFAULT_TARGET = TARGET
+
+# 除 skill/ 之外，这些文件也**直接喂给参赛 AI** —— 提示词模板会被整份贴进它的上下文，
+# 所以同样不许出现游戏内情。
+# 2026-10-06 差点在这里漏掉一处：我在 PROMPTS.md 里写了「全图的煤够放约 160 台」，
+# 而当时的检查只覆盖 skill/。**「参赛者读物」的范围比 skill/ 大。**
+EXTRA_TARGETS = [ROOT / "docs" / "PROMPTS.md"]
 
 # ---- 违规规则：(名称, 正则, 理由) ----
 # ⚠ 不要把**接口返回的字段名**列进来。
@@ -159,6 +166,9 @@ def main() -> int:
         return 1
 
     files = [p for p in sorted(target.rglob("*")) if p.is_file() and p.suffix not in SKIP_SUFFIX]
+    # 只在检查默认目标时附带额外文件；显式 --target 别的目录时不掺进来。
+    if target == DEFAULT_TARGET:
+        files += [p for p in EXTRA_TARGETS if p.is_file() and p.suffix not in SKIP_SUFFIX]
     allbad: list[str] = []
     allhints: list[str] = []
     for p in files:
