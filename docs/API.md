@@ -328,11 +328,37 @@ Python 侧用 `arena.load_admin_token()`；参赛客户端用 `arena.load_own_to
 | `efficiency` | 工作效率 0~1 |
 | `rotation` | 朝向 0~3 |
 | `items` | 该建筑库存 `{"物品名":数量}` |
+| `itemCapacity` | **每种物品各自**的上限 —— **不是所有物品加起来的总量**。见下 |
 | `liquids` | 液体库存 |
 | `powered` | 是否有电（有电力接口的方块才有） |
 | `acceptsFrom` | **能从哪几个邻格收货**（传送带专用），`[[x,y],...]` |
 | `sendsTo` | **把货推到哪几格**，`[[x,y],...]` |
 | `fogRadius` | 该建筑的视野半径；**仅在该值 > 0 时出现**（核心是 61） |
+
+#### `itemCapacity` —— 每种物品各自的上限
+
+**它不是一个总量。** 一台 `itemCapacity: 10` 的机器可以**同时**存 10 个沙 + 10 个煤，
+互不挤占；煤不会因为沙多了而进不去。
+
+判据在引擎里写得非常直接：
+
+```java
+// BuildingComp.getMaximumAccepted(Item item) —— 根本没用到那个 item 参数
+public int getMaximumAccepted(Item item){ return block.itemCapacity; }
+
+// BuildingComp.acceptItem —— 拿它跟**该物品自己**的数量比
+return block.consumesItem(item) && items.get(item) < getMaximumAccepted(item);
+```
+
+**为什么值得单列一条**：这个误解会让策略整个跑偏。实测有一位 agent 认为
+「沙煤比 2.35:1 超过了配方 2:1 ⇒ 沙会挤占煤的空间、必然缓慢塞满」，
+于是**重建冶炼厂 4 次**（每次 `break` → 等 → `place`，约 15–25 秒）——
+而**沙堆满只会让沙线堵住**（带子每格容量只有 1），**煤线独立、完全不受影响**。
+
+所以看到「某个输入堆着不动」时，先分清楚是**建筑内部满了**还是**线上堵了**：
+
+- 建筑内部：该物品数量 == `itemCapacity` ⇒ 它对这种物品不再收货（**别的物品照收**）
+- 线上堵：带子容量只有 1，堆在带子上就是在**等下游**，与建筑内部空间无关
 
 #### `acceptsFrom` / `sendsTo` —— 物流接口
 

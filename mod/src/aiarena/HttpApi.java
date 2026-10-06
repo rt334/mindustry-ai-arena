@@ -4616,6 +4616,9 @@ public final class HttpApi {
                 // anchorX/anchorY —— 引擎自己的换算，别按「中心 ± size/2」推（那是错的）。
                 .put("size", b.size)
                 .put("anchorX", b.anchorX).put("anchorY", b.anchorY)
+                // 每种物品各自的上限（不是总量）—— 没有它就无法判断「这台机器满了没有」，
+                // 只能靠看 items 有没有停止增长去猜。
+                .put("itemCapacity", b.itemCapacity)
                 .putRaw("items", its.toString())
                 .putRaw("liquids", lqs.toString());
 

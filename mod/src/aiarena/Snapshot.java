@@ -263,6 +263,21 @@ public final class Snapshot {
         /** 方块尺寸（1x1 = 1、2x2 = 2、核心 5x5 = 5）。 */
         public final int size;
         /**
+         * **每种物品各自**的上限。
+         *
+         * ⚠ 它**不是**所有物品加起来的总量 —— 一台 `itemCapacity = 10` 的机器
+         * 可以同时存 10 个沙 + 10 个煤，互不挤占。
+         *
+         * 判据在 `BuildingComp.getMaximumAccepted(item)`：它**根本不依赖那个 item 参数**，
+         * 对任何物品都返回同一个值；而 `acceptItem` 判的是 `items.get(item) < 该值` ——
+         * 按物品各自比较。
+         *
+         * 实测误导过一个 agent：它以为「沙煤比 2.35:1 超过配方 2:1 ⇒ 沙会挤占煤的空间、
+         * 必然缓慢塞满」，于是**重建冶炼厂 4 次**。实际沙堆满只会让**沙线**堵住
+         * （带子每格容量只有 1），煤线独立、不受影响。
+         */
+        public final int itemCapacity;
+        /**
          * 覆盖范围的**左上角**（= 中心 − `sizeOffset`，用引擎自己的换算）。
          *
          * 为什么要单给：`x` / `y` 是方块的**中心**，多格方块要画边界就得自己减偏移，
@@ -279,7 +294,7 @@ public final class Snapshot {
                   String config, boolean constructing, float buildProgress,
                   int rotation, float powerStatus, int[] powerLinks,
                   float fogRadius, int[] acceptsFrom, int[] sendsTo,
-                  int size, int anchorX, int anchorY) {
+                  int size, int anchorX, int anchorY, int itemCapacity) {
             this.id = id;
             this.x = x; this.y = y; this.team = team; this.block = block;
             this.health = health; this.maxHealth = maxHealth;
@@ -296,6 +311,7 @@ public final class Snapshot {
             this.sendsTo = sendsTo;
             this.size = size;
             this.anchorX = anchorX; this.anchorY = anchorY;
+            this.itemCapacity = itemCapacity;
         }
     }
 
@@ -533,7 +549,8 @@ public final class Snapshot {
                     iNames, iAmts, lNames, lVals, cfg, constructing, progress,
                     b.rotation, pstat, plinks, fogR, acceptsFrom, sendsTo,
                     b.block.size,
-                    b.tileX() + b.block.sizeOffset, b.tileY() + b.block.sizeOffset));
+                    b.tileX() + b.block.sizeOffset, b.tileY() + b.block.sizeOffset,
+                    b.block.itemCapacity));
             }
         }
         return list.toArray(BuildInfo.class);
