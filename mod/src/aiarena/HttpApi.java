@@ -113,6 +113,25 @@ public final class HttpApi {
             String agentId = parts[2];
             String action  = parts[3];
 
+            // 无鉴权的桥接端点：GET /v1/bridge/<agentId>
+            //
+            // 给「不一定是 DSH agent」的参赛客户端用的语言无关接入方式 ——
+            // 一次请求拿到 {agent, apiVersion, httpBase, role, token}，
+            // 不必知道配置文件在哪，也不必用某个 SDK。
+            //
+            // 风险边界：它公布的是**该 agent 自己的** token，而配置文件里本来就明文
+            // 躺着所有非裁判 token、且与参赛 AI 同机可读 —— 所以这不增加实际暴露面。
+            // 裁判的条目不含 token（见 AIArena.bridgeJson）。绑定在回环地址时，
+            // 本端点天然只有本机进程能访问。
+            //
+            // 注意：这条路径与 /v1/<agent>/<action> 形状相同，所以 agent 不该起名 "bridge"。
+            if (parts.length == 4 && parts[2].equals("bridge")) {
+                String b = AIArena.bridgeJson(parts[3]);
+                if (b == null) respond(ex, 404, Json.error(1002, "no such agent: " + parts[3]));
+                else respond(ex, 200, Json.ok(b));
+                return;
+            }
+
             AIArena.Agent agent = AIArena.authenticate(ex.getRequestHeaders().getFirst("Authorization"));
             if (agent == null) {
                 respond(ex, 401, Json.error(1401, "missing or invalid Authorization: Bearer <token>"));
@@ -132,6 +151,16 @@ public final class HttpApi {
             if (Audit.isMutating(action) || privileged) {
                 Audit.log(agentId, agent.team() == null ? -1 : agent.team().id, action,
                           rawQuery, ex.getRequestMethod(), privileged);
+            }
+
+            // 只读角色（observer）不许改游戏状态 —— 在路由之前一票否决。
+            // 判据直接复用 Audit.isMutating（它本来就在判断「哪些动作会改状态」），
+            // 不另发明一份清单，免得两处不一致。
+            if ("observer".equals(agent.role) && Audit.isMutating(action)) {
+                respond(ex, 403, Json.error(1403,
+                    "role 'observer' is read-only: '" + action + "' changes game state. "
+                  + "Ask the organizer for role 'player' if you are competing."));
+                return;
             }
 
             // 限流在鉴权之后、路由之前：过不了鉴权的请求不该消耗配额。
@@ -211,13 +240,13 @@ public final class HttpApi {
         if (v == null || v.isEmpty() || v.equalsIgnoreCase("own")) return ownId;
 
         if (v.equalsIgnoreCase("all")) {
-            return agent.admin ? -1 : ownId;
+            return agent.canObserve ? -1 : ownId;
         }
 
         try {
             int id = Integer.parseInt(v.trim());
             if (id < 0 || id >= Team.all.length) return ownId;
-            if (!agent.admin && id != ownId) return ownId;
+            if (!agent.canObserve && id != ownId) return ownId;
             return id;
         } catch (NumberFormatException e) {
             return ownId;
@@ -2103,7 +2132,7 @@ public final class HttpApi {
         dedupeAgentPlayers();
 
         for (AIArena.Agent a : AIArena.agents) {
-            if (a.admin) continue;
+            if (!a.canPlay) continue;      // 裁判与只读观察者都不上场（见 Agent.canPlay）
             Team t = a.team();
             if (t == null) continue;
 
@@ -2477,7 +2506,7 @@ public final class HttpApi {
             if (!first) teams.append(',');
             first = false;
 
-            boolean allowed = agent.admin || t.id == (agent.team() == null ? -1 : agent.team().id);
+            boolean allowed = agent.canObserve || t.id == (agent.team() == null ? -1 : agent.team().id);
             teams.append(new Json.Obj()
                 .put("id", t.id).put("name", t.name)
                 .put("cores", t.cores).put("alive", t.alive).put("isAI", t.ai)
@@ -2488,13 +2517,14 @@ public final class HttpApi {
 
         respond(ex, 200, Json.ok(new Json.Obj()
             .put("agent", agent.id)
-            .put("isReferee", agent.admin)
+            .put("isReferee", agent.canReferee)
+            .put("role", agent.role)
             .put("currentView", viewId < 0 ? "all" : Team.get(viewId).name)
-            .put("canSeeAll", agent.admin)
+            .put("canSeeAll", agent.canObserve)
             .putRaw("teams", teams.toString())
-            .putRaw("hint", Json.str(agent.admin
+            .putRaw("hint", Json.str(agent.canObserve
                 ? "append &view=all for god view, or &view=<teamId> for a specific team"
-                : "append &view=own (default). Admin token required for view=all"))
+                : "append &view=own (default). role 'observer' or 'referee' required for view=all"))
             .toString()));
     }
 
@@ -3454,7 +3484,7 @@ public final class HttpApi {
             java.util.List<AIArena.Agent> waiting = new java.util.ArrayList<>();
             int bindIndex = 0;
             for (AIArena.Agent a : AIArena.agents) {
-                if (a.admin) continue;
+                if (!a.canPlay) continue;   // 只让参赛者占位；observer / referee 都不占
 
                 if (bindIndex < mapCoreTeams.size()) {
                     Team t = mapCoreTeams.get(bindIndex++);

@@ -71,18 +71,37 @@ Mindustry 正常的多人流程是客户端用 TCP+UDP 连 6567，跑一遍握�
 | 2 | 起服务端与对局（`live-match.ps1`），等 `GET /ping` 返回 ok |
 | 3 | 用 `Authorization: Bearer <token>` 调 `/v1/<agent>/...` |
 
-```python
-from arena import Arena, load_tokens
-toks, admin = load_tokens()
-a = Arena("alpha", toks["alpha"])
-a.wait_online(timeout=120)      # 轮询到服务端可响应
-print(a.state())                # 已经在局里了，不需要额外的加入步骤
+### 不用任何 SDK 也能接入：`GET /v1/bridge/<agentId>`
+
+**第 1 步不必去翻配置文件。** 这个端点无鉴权，一次请求给出接入所需的一切：
+
 ```
+$ curl -s http://127.0.0.1:7199/v1/bridge/alpha
+{"ok":true,"data":{"agent":"alpha","apiVersion":"1.4","httpPort":7199,
+ "httpBase":"http://127.0.0.1:7199/v1/alpha","role":"player","token":"72d1…006f"}}
+```
+
+本地文件 `server-run/bridge-<agent>.json` 是**同一份内容**，用哪种方式取都行。
+这样任何语言、任何运行位置的客户端都能接入，不必知道本项目的目录结构。
+
+**裁判的条目不含 `token`**，只有一句 `tokenHint` —— 它的凭据只从环境变量
+`ARENA_ADMIN_TOKEN` 读（fail-closed）。`GET /v1/bridge/<不存在的 agent>` → `code=1002`。
+
+### `role`：三档权限
+
+| `role` | 能做什么 |
+|---|---|
+| `player` | 参赛 AI：读写自己队伍的；`view` 只能是 own |
+| `observer` | **只读观战**：能 `view=all` 看全图，但改状态的端点一律 `403 / 1403` |
+| `referee` | 裁判：全部，含 `setup` / `host` / `fog` / `spawn` 带 `team=` |
+
+旧配置里的 `"admin": true` 等价于 `referee`（向后兼容）。查自己的角色用 `/observe` ——
+它返回 `role` / `canSeeAll` / `isReferee`。
 
 **AI 与真人玩家的差别只在「怎么发指令」**（HTTP vs 键盘鼠标），
 不在「能看到什么、能做什么」。这是本项目的公平竞技约束。
 
-裁判（`admin=true`）额外多一项能力：带 `view=all` 看全图。
+裁判（`role=referee`）额外多一项能力：带 `view=all` 看全图；`observer` 也能看全图，但不能动手。
 
 ---
 

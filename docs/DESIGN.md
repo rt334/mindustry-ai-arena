@@ -721,7 +721,7 @@ public static Team get(int id){ return all[((byte)id) & 0xff]; }
 
 ### 6.1 HTTP 端点
 
-**共 36 个 HTTP 端点 = 35 个 `/v1/{agentId}/<action>` + 无鉴权的 `/ping`**
+**共 37 个 HTTP 端点 = 35 个 `/v1/{agentId}/<action>` + 无鉴权的 `/ping` 与 `/v1/bridge/<agentId>`**
 （另有独立的 WebSocket `/ws`，在 7200 端口，不计入）。
 逐条的参数与响应见 [`API.md`](API.md)；**唯一事实源是 `HttpApi.java` 的路由 `switch`**
 与 `start()` 里的 `createContext`，本清单按源码逐条核对过。
@@ -776,7 +776,8 @@ public static Team get(int id){ return all[((byte)id) & 0xff]; }
   /v1/{referee}/admin                     在线玩家管理
 
 无鉴权
-  /ping                                   健康检查
+  /ping                                   健康检查（无鉴权）
+  /v1/bridge/{agentId}                    桥接信息（**无鉴权**：含该 agent 自己的 token；裁判条目不含）
 ```
 
 统一响应信封：

@@ -34,11 +34,16 @@
 5. **改 `mod/src/aiarena/*.java` 后必须重新编译部署 + 重启服务器**（不热加载）。
    编译命令见 `docs/DEVELOPING.md` §二；**jar 条目数应是 49**（45 class + `mod.hjson`
    + `MANIFEST.MF` + 2 目录项），数目变了说明有文件增删 —— **离线断言会替你查这个数**。
-6. **凭据不进模型上下文。** 参赛客户端只用自己的 token（`arena.load_own_token(agent_id)`）；
+6. **凭据不进模型上下文。** 参赛客户端只用自己的 token —— 取法有三种，都只给**自己那一个**：
+   `GET /v1/bridge/<agentId>`（无鉴权）、本地 `bridge-<agent>.json`（同源）、
+   或 `arena.load_own_token(agent_id)`。
    **admin 凭据只从环境变量 `ARENA_ADMIN_TOKEN` 读** —— 配置文件里那条已被服务器忽略，
-   读不到就不注册 admin（fail-closed）。裁判脚本从环境变量或 `server-run/admin-token.txt` 取。
-   拿 admin 的 `view=all` 看全图等于越过对等约束，**而且会被审计记下**（`privileged:true`）——
+   读不到就不注册 admin（fail-closed），`/v1/bridge/referee` 也只给 `tokenHint` 不给 token。
+   拿裁判的 `view=all` 看全图等于越过对等约束，**而且会被审计记下**（`privileged:true`）——
    见 `docs/CONDITIONS.md` 事故记录第 6 条。
+   **权限分三档** `player` / `observer` / `referee`（旧 `admin:true` = referee）：
+   `observer` 能 `view=all` 但不能改状态，**且 setup 不给它核心与单位**
+   （给了它就不再是纯观察者 —— 引擎会给有核心的队伍塞单位）。
 7. **改 `.ps1` 文件要小心 BOM。** 四个 `.ps1`（`start-arena` / `live-match` / `diagnose` /
    `stress-test`）都带 UTF-8 BOM，而 `.gitattributes` 声明 `*.ps1 -text` —— **BOM 是文件内容的一部分**。
    普通文本编辑会吃掉它，后果是 Windows PowerShell 5.1 按 GBK 解析中文。
@@ -62,7 +67,7 @@ $mj = 'C:\dsh\Mindustry-src\desktop\build\libs\Mindustry.jar'
 | 层次 | 手段 | 要不要起游戏 |
 |---|---|---|
 | 编译 / class 集合一致性 | 上面的 `javac` + `jar tf` 比对 | 不要 |
-| **离线断言套件**（69 项：JSON 转义 / 响应信封 / 审计判定 / 状态码映射 / 端点数量 / 错误码集合 / `shape` 取值 / jar 条目） | `python drive/offline-checks.py`（`--src` 可跳过 JVM） | 不要 |
+| **离线断言套件**（71 项：JSON 转义 / 响应信封 / 审计判定 / 状态码映射 / 端点数量 / 错误码集合 / `shape` 取值 / jar 条目 / 文档里写死的数字） | `python drive/offline-checks.py`（`--src` 可跳过 JVM） | 不要 |
 | **`skill/` 边界检查**（参赛者可见包有没有泄漏游戏内情） | `python drive/check-boundary.py`（先 `--selftest`） | 不要 |
 | **文档按需检索**（取某一节，而不是整份读） | `python drive/docs-index.py --grep/-read` | 不要 |
 | 全功能回归 | `.\stress-test.ps1`（62 用例，自起服务器） | 要 |

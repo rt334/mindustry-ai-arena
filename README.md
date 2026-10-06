@@ -59,13 +59,19 @@ AI ──HTTP──→ Mod（服务器内）──引擎 API──→ 世界
 {"ok": false, "code": 1005, "error": "target tile is not visible to sharded"}
 ```
 
-鉴权：`Authorization: Bearer <token>`（token 在 `config/ai-arena.json` 里，首次启动自动生成）
+鉴权：`Authorization: Bearer <token>`。token 在 `config/ai-arena.json` 里（首次启动自动生成），
+但**不必去翻它** —— `GET /v1/bridge/<agentId>` 是无鉴权的，一次请求就给出
+`{apiVersion, httpBase, role, token}`；本地 `server-run/bridge-<agent>.json` 是同一份内容。
+
+**`role` 三档**：`player`（参赛，只能看自己队伍）/ `observer`（只读观战，能看全图但不能动手）/
+`referee`（裁判，全部）。旧配置里的 `admin: true` 等价于 `referee`。
 
 ### 读
 
 | 端点 | 说明 |
 |---|---|
 | `GET /ping` | 存活探测（无需鉴权） |
+| `GET /v1/bridge/<agentId>` | 桥接信息（**无需鉴权**）：接入所需的 `httpBase` / `role` / `token`；裁判条目不含 token |
 | `GET /state` | 局面快照：tick / 规则 / 队伍 / 视野内实体 |
 | `GET /units` | 视野内单位（含携带物、当前指令） |
 | `GET /buildings` | 视野内建筑（含库存、液体、配置、施工进度） |
@@ -104,7 +110,7 @@ AI ──HTTP──→ Mod（服务器内）──引擎 API──→ 世界
 | `POST /control?op=enter&unit=` | 接管单位：`pos` / `move` / `order` / `enter` / `release` / `fire` / `stopmove` / `orders` / `probe` / `ticks`（`warp` 默认禁用） |
 | `POST /queue?clear=true` | 清空全队待办计划 |
 
-### 裁判（admin token）
+### 裁判（`role=referee`）
 
 | 端点 | 说明 |
 |---|---|

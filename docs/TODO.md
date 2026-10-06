@@ -594,6 +594,8 @@ PASS 12 / FAIL 0 / SKIP 0
 
 | 待做 | 说明 |
 |---|---|
+| #3 权限分级（`role` 三档） | **已做并实测** —— `player` / `observer` / `referee`，旧 `admin:true` 自动等价 referee。observer 实测：`view=all` 可用、`place`/`command` 返回 403、`/observe` 显示 `role:observer` + `canSeeAll:true` + `isReferee:false`；**setup 不再给它核心与单位**（修前会拿到 `core[watch1]@108,21` 加一个 derelict 单位） |
+| token 桥接端点（非 DSH 客户端接入） | **已做并实测** —— `GET /v1/bridge/<agentId>`（无鉴权）：`alpha`/`watch1` 拿到自己的 token，`referee` 只给 `tokenHint`（fail-closed），`nobody` → `1002`。`bridge-<agent>.json` 与它同源 |
 | #10 git 提交 | **已提交**（2026-10-06，4 个 commit 按主题分组）：`feat(mod)` /watch + appliedRot + 凭据 fail-closed + 特权读审计；`feat(drive)` 离线工具 + AGENTS.md；`docs` 全量同步；`chore` BOM + 凭据来源 + 清理封面 + 补脚本。提交后 `git diff` 为空、无意外改动。**未提交**：`drive/` 下 7 个属于另一个项目的文件（见下） |
 | #10 遗留 | `drive/make-cover-{fish,four,night,paper}.py`、`scan-fish-{all,license}.py`、`fish-license-scan.json` —— 谈的是「鲸鱼娘立绘」「蓝色大肥鱼」站的授权扫描，其中夜战版自己写着「**和 Mindustry 毫无关系**」，判为**另一个项目**的东西。**没提交、也没删**，等你决定去处 |
 | #12 观察者 Mod 图形观感 | **已在图形界面实测**（2026-10-06）—— `Loading mod: ai-observer` → 自动连上 `127.0.0.1:6567` → `Received world data`；服务端 `/diag` 的 `fullViewSends=334 / spectatorRouted=334` 证明它在给观察者发全景快照。截图核对：左上角「观战端 / 视角: derelict (全图)」面板 + 三个按钮 + 快捷键帮助 + 小地图，中文完整，并明确标注「只读观战：服务端不会给你任何单位」。**图形回放仍未做**（那是另一件事） |
@@ -605,7 +607,7 @@ PASS 12 / FAIL 0 / SKIP 0
 |---|---|---|---|
 | 1 | **起始位置轮换** | ~~各队核心由 `findCoreSpot + layCoreZone` 自放，位置不同 ⇒ 存在位置优势~~ → **核实后不成立**：主路径是**用官方 PvP 图自带的核心**（位置对称），自建核心只是核心数量不够时的回退（`P1-IMPLEMENTATION.md` §5.2） | **不做**（已移入 §六） |
 | 2 | **凭据边界要不要继续收紧** | 短期已做（fail-closed + 审计留痕 + skill 不再演示取 admin）；中期/长期没做 | 要不要把参赛 token 改成**从环境变量注入、不再落盘**？要不要让 admin 与参赛 token **分文件存放**并加 ACL？ |
-| 3 | **权限要不要分级** | 只有 admin / 非 admin 两档，加 `warp`、`spawn` 两个开关 | 要不要做成「逐操作三态（允许／询问／禁止）」？rimworld-teammate 的形状见 [PRIOR-ART.md](PRIOR-ART.md) §三 |
+| 3 | **权限分级** | **已做**（2026-10-06）：配置里的 `admin` 布尔换成 `role` 三档 —— `player` / `observer` / `referee`，旧 `admin:true` 自动等价于 `referee`。`observer` 能 `view=all` 但不能改状态（改状态的端点一律 403），且 **setup 不给它核心与单位** | 用户拍板「可以分级」 |
 
 ### 9.2 可信度相关
 

@@ -19,7 +19,7 @@ import java.security.SecureRandom;
  *   "port": 7199,
  *   "rateLimit": { "perSecond": 60, "burst": 200 },
  *   "agents": [
- *     { "id": "alpha", "team": 100, "token": "<48 hex chars>", "admin": false },
+ *     { "id": "alpha", "team": 100, "token": "<48 hex chars>", "role": "player" },
  *     ...
  *   ]
  * }
@@ -299,6 +299,36 @@ public final class AIArena {
         public final byte[] tokenBytes;
         /** 明文 token。WS 内部转发命令时要拼回 REST 请求头用。 */
         public final String token;
+
+        /**
+         * 权限等级 —— `player` / `observer` / `referee`。
+         *
+         * 为什么要有它（docs/TODO.md §九 #3）：此前只有 `admin` 一个布尔，
+         * 于是「只读观战」与「能改全图」是同一档 —— 观察者想用 `view=all`，
+         * 就必须拿到裁判的全部权限。三档把这两件事拆开：
+         *
+         *   player    参赛 AI：只读写自己队伍的
+         *   observer  只读观战：能 `view=all`，但任何改状态的端点都被拒
+         *   referee   裁判：全部，含 setup / host / fog / spawn team=
+         *
+         * 旧配置里的 `"admin": true` 等价于 `referee`，向后兼容。
+         */
+        public final String role;
+        /** 能执行裁判操作。 */
+        public final boolean canReferee;
+        /** 能看全图（`view=all`）—— `observer` 与 `referee` 都有。 */
+        public final boolean canObserve;
+        /**
+         * 是不是**参赛者**（能拥有核心与单位）。
+         *
+         * 只有 `player` 能上场：`referee` 本来就不该占一个队，而 `observer` 更不能 ——
+         * DESIGN 里那段警告说的就是这件事：观战者所属队伍一旦有核心，
+         * `bestCore()` 非空，引擎 1 秒后就给它塞一个单位，它就不再是纯观察者了。
+         * 实测确认过：把 observer 交给 setup，它会被分配 `core[watch1]@108,21`
+         * 和一个 derelict 单位。
+         */
+        public final boolean canPlay;
+        /** 旧名，等价于 `canReferee`。保留是为了让既有调用点语义不变。 */
         public final boolean admin;
 
         /**
@@ -326,13 +356,17 @@ public final class AIArena {
          */
         private volatile mindustry.gen.Player player;
 
-        Agent(String id, int teamId, byte[] tokenBytes, boolean admin) {
+        Agent(String id, int teamId, byte[] tokenBytes, String role) {
             this.id = id;
             this.configTeamId = teamId;
             this.activeTeamId = teamId;
             this.tokenBytes = tokenBytes;
             this.token = new String(tokenBytes, java.nio.charset.StandardCharsets.UTF_8);
-            this.admin = admin;
+            this.role = role;
+            this.canReferee = "referee".equals(role) || "admin".equals(role);
+            this.canObserve = canReferee || "observer".equals(role);
+            this.canPlay = "player".equals(role);
+            this.admin = canReferee;
         }
 
         public Team team() { return Team.get(activeTeamId); }
@@ -354,7 +388,7 @@ public final class AIArena {
         @Override public String toString() {
             return "Agent(" + id + ", team=" + activeTeamId
                  + (activeTeamId == configTeamId ? "" : " (cfg " + configTeamId + ")")
-                 + ", admin=" + admin
+                 + ", role=" + role
                  + (player == null ? "" : ", player=" + player.name)
                  + ")";
         }
@@ -449,10 +483,22 @@ public final class AIArena {
                     if (id == null || id.isEmpty()) { log("skip agent without id"); continue; }
                     int team = a.getInt("team", -1);
                     if (team < 0 || team >= Team.all.length) { log("skip agent " + id + ": bad team " + team); continue; }
-                    boolean admin = a.getBool("admin", false);
+                    // 权限等级：新配置写 role；旧配置写 admin（等价于 referee）
+                    String role = a.getString("role", null);
+                    if (role == null || role.trim().isEmpty()) {
+                        role = a.getBool("admin", false) ? "referee" : "player";
+                    }
+                    role = role.trim().toLowerCase();
+                    if (!role.equals("player") && !role.equals("observer")
+                        && !role.equals("referee") && !role.equals("admin")) {
+                        log("skip agent " + id + ": unknown role '" + role
+                            + "' (player / observer / referee)");
+                        continue;
+                    }
+                    boolean needsAdminCred = role.equals("referee") || role.equals("admin");
 
                     String tok;
-                    if (admin) {
+                    if (needsAdminCred) {
                         // admin 凭据**一律不从配置文件读**。
                         //
                         // 为什么：这个配置文件与参赛 AI 同机、可读，而 admin 的 view=all
@@ -477,7 +523,7 @@ public final class AIArena {
                             continue;
                         }
                     }
-                    agents.add(new Agent(id, team, tok.getBytes("UTF-8"), admin));
+                    agents.add(new Agent(id, team, tok.getBytes("UTF-8"), role));
                 }
             }
 
@@ -502,17 +548,19 @@ public final class AIArena {
             + "  \"port\": 7199,\n"
             + "  \"rateLimit\": { \"perSecond\": 60, \"burst\": 200 },\n"
             + "  \"agents\": [\n"
-            + "    { \"id\": \"alpha\", \"team\": 100, \"token\": \"" + token + "\", \"admin\": false },\n"
-            + "    { \"id\": \"beta\",  \"team\": 101, \"token\": \"" + randomToken() + "\", \"admin\": false },\n"
-            // admin 条目的 token 刻意留空：它的凭据只从环境变量 ARENA_ADMIN_TOKEN 读，
+            + "    { \"id\": \"alpha\",     \"team\": 100, \"token\": \"" + token + "\", \"role\": \"player\" },\n"
+            + "    { \"id\": \"beta\",      \"team\": 101, \"token\": \"" + randomToken() + "\", \"role\": \"player\" },\n"
+            + "    { \"id\": \"spectator\", \"team\": 0,   \"token\": \"" + randomToken() + "\", \"role\": \"observer\" },\n"
+            // referee 条目的 token 刻意留空：它的凭据只从环境变量 ARENA_ADMIN_TOKEN 读，
             // 不写进这个文件 —— 文件与参赛 AI 同机可读，写进去等于把裁判权限递出去。
-            + "    { \"id\": \"referee\", \"team\": 0, \"token\": \"\", \"admin\": true }\n"
+            + "    { \"id\": \"referee\",   \"team\": 0,   \"token\": \"\", \"role\": \"referee\" }\n"
             + "  ]\n"
             + "}\n";
         try {
             file.writeString(cfg, false, "UTF-8");
-            log("generated tokens for 3 agents (see " + file.absolutePath() + ")");
-            log("NOTE: 'referee' 是 admin，它的 token 留空 —— 请用环境变量 ARENA_ADMIN_TOKEN 提供它。");
+            log("generated tokens for 4 agents (see " + file.absolutePath() + ")");
+            log("NOTE: role 取值 player / observer / referee（旧配置的 admin:true 仍等价于 referee）；"
+                + "'referee' 的 token 留空 —— 请用环境变量 ARENA_ADMIN_TOKEN 提供它。");
         } catch (Throwable t) {
             log("failed to write default config: " + t);
         }
@@ -647,17 +695,43 @@ public final class AIArena {
      * **不写 token** —— 它只解决「连哪」，不解决「以谁的身份」。
      * 把凭据塞进固定路径的文件里，等于把钥匙放在门口垫子下。
      */
+    /**
+     * 某个 agent 的桥接信息 —— **无鉴权端点 `/v1/bridge/<agentId>` 与本地
+     * `bridge-<agent>.json` 用的是同一份内容**，单一来源。
+     *
+     * 为什么要它：「参赛 AI 不一定是 DSH agent」—— 它可能用任何语言、跑在任何地方，
+     * 不该被迫去读某个特定路径的配置文件，也不该被迫用某个 SDK。
+     * 一次 GET 拿到 {agent, apiVersion, httpBase, role, token} 就够了。
+     *
+     * 裁判的条目**不含 token**：与 fail-closed 一致 —— 它的凭据只从
+     * `ARENA_ADMIN_TOKEN` 读，不从任何可读文件或接口流出。
+     *
+     * @return JSON 串；agent 不存在返回 null（调用方转 404）
+     */
+    public static String bridgeJson(String agentId) {
+        for (Agent ag : agents) {
+            if (!ag.id.equals(agentId)) continue;
+            Json.Obj o = new Json.Obj()
+                .put("agent", ag.id)
+                .put("apiVersion", API_VERSION)
+                .put("httpPort", port)
+                .put("httpBase", "http://" + bind + ":" + port + "/v1/" + ag.id)
+                .put("role", ag.role);
+            if (!ag.canReferee) {
+                o.put("token", ag.token);
+            } else {
+                o.put("tokenHint",
+                      "referee token is not published here; it comes from ARENA_ADMIN_TOKEN");
+            }
+            return o.toString();
+        }
+        return null;
+    }
+
     private static void writeDiscoveryFiles() {
         try {
             for (Agent ag : agents) {
-                String base = "http://" + bind + ":" + port + "/v1/" + ag.id;
-                String json = new Json.Obj()
-                    .put("agent", ag.id)
-                    .put("apiVersion", API_VERSION)
-                    .put("httpPort", port)
-                    .put("httpBase", base)
-                    .toString();
-                Core.files.local("bridge-" + ag.id + ".json").writeString(json);
+                Core.files.local("bridge-" + ag.id + ".json").writeString(bridgeJson(ag.id));
             }
             log("wrote " + agents.size() + " discovery file(s): bridge-<agent>.json");
         } catch (Throwable t) {

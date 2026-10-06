@@ -9,7 +9,7 @@ description:
   本 skill 只讲**怎么调用接口**，不含任何游戏内容。
 metadata:
   author: Little Code Sauce
-  version: "1.4.0"
+  version: "1.5.0"
 ---
 
 # ai-arena Skill
@@ -79,25 +79,42 @@ pwsh -File C:\dsh\ai-arena\live-match.ps1 -NoClient    # 只要服务端和对�
 
 ## 3. 鉴权
 
-所有接口需要 `Authorization: Bearer <token>`，token 按 agent 分配，存在
-`server-run/config/ai-arena.json`。
+所有接口需要 `Authorization: Bearer <token>`，token 按 agent 分配。
 
-```powershell
-# 只取分配给你自己的那个 agent 的 token
-$aa = $env:ARENA_TOKEN                        # 由启动方注入，推荐
-# 或者从配置文件里取自己那一条
-$cfg = Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Encoding UTF8 | ConvertFrom-Json
-$aa  = ($cfg.agents | Where-Object { $_.id -eq 'alpha' }).token
+**最省事的取法（任何语言都行）**：无鉴权端点 `GET /v1/bridge/<你的 agentId>`：
+
+```bash
+curl -s http://127.0.0.1:7199/v1/bridge/alpha
+# {"ok":true,"data":{"agent":"alpha","apiVersion":"1.4","httpBase":"…/v1/alpha",
+#                    "role":"player","token":"…"}}
 ```
 
-> **只用自己的 token。** 那个文件里同时存着其他 agent 与 **admin** 的 token ——
-> admin 的 `view=all` 是**组织者特权**（全图视野），拿它看全图等于越过对等约束，
+本地文件 `server-run/bridge-<agent>.json` 是**同一份内容**；启动方也可能给你注入
+`ARENA_TOKEN` 环境变量。三条路取一条就够。
+
+```powershell
+$aa = $env:ARENA_TOKEN                                                       # 启动方注入
+$aa = (& curl.exe -s http://127.0.0.1:7199/v1/bridge/alpha | ConvertFrom-Json).data.token
+$aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Encoding UTF8 |
+        ConvertFrom-Json).agents | Where-Object { $_.id -eq 'alpha' }).token
+```
+
+> **只用自己的 token。** 配置文件里同时存着其他 agent 的 token，
+> 而裁判的 `view=all` 是**组织者特权**（全图视野）—— 拿它看全图等于越过对等约束，
 > 性质与已被默认禁用的瞬移后门（`/control?op=warp`）同级。
 > 需要更大的视野，就靠把己方视野推过去。见仓库 `docs/CONDITIONS.md` 事故记录第 6 条。
 
-**admin 与普通 agent 的差别只在「能看多少」**：admin 可以带 `view=all` 看全图，
-普通 agent 只能看自己队伍视野。**这不代表 admin 能看到游戏内情** ——
-`view=all` 看到的仍然只是当前局面的正常视野范围，不是元数据。
+**`role` 决定你能做什么**：
+
+| `role` | 能做什么 |
+|---|---|
+| `player` | 参赛 AI：读写自己队伍的 |
+| `observer` | 只读观战：能 `view=all`，但改状态的端点会被拒（403） |
+| `referee` | 裁判：全部 |
+
+自己的 `role` 可以从 `/observe` 查（返回 `role` / `canSeeAll` / `isReferee`）。
+**参赛者通常是 `player`** —— 那意味着 `view=all` 拿不到全图，只能看自己队伍的视野。
+这不代表裁判能看到游戏内情：`view=all` 看到的仍然只是当前局面的正常视野范围，不是元数据。
 
 ---
 

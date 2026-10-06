@@ -10,6 +10,40 @@
 > [TODO.md](docs/TODO.md) 里「接口版本号没有约定」一条。
 
 
+## 权限分级与桥接端点（2026-10-06）
+
+### agent 有了 `role`，不再只有 admin 一个布尔
+
+配置里 `"admin": true/false` 换成 `role` 字符串，三档：
+
+| `role` | 能做什么 |
+|---|---|
+| `player` | 参赛 AI：读写自己队伍的；`view` 只能是 own |
+| `observer` | **只读观战**：能 `view=all` 看全图，但任何改状态的端点都返回 403 |
+| `referee` | 裁判：全部，含 `setup` / `host` / `fog` / `spawn` 带 `team=` |
+
+**向后兼容**：旧配置的 `"admin": true` 等价于 `referee`、`false` 等价于 `player`——不改配置也能跑。
+
+**`observer` 不上场**：setup 不会给它分配核心或单位。这不是优化，是必须的——
+`DESIGN` 里早写过原因：观战者所属队伍一旦有核心，`bestCore()` 非空，
+引擎 1 秒后就塞给它一个单位，它就不再是纯观察者了。**实测确认过这个陷阱真实存在**
+（未修时会看到 `core[watch1]@108,21` 加一个 derelict 单位）。
+
+### 新增无鉴权端点 `GET /v1/bridge/<agentId>`
+
+给**不一定是 DSH agent**的参赛客户端用的语言无关接入方式：一次请求拿到
+
+```json
+{"agent":"beta","apiVersion":"1.4","httpPort":7199,
+ "httpBase":"http://127.0.0.1:7199/v1/beta","role":"player","token":"<48 hex>"}
+```
+
+不必知道配置文件在哪，也不必用某个 SDK。本地文件 `bridge-<agent>.json` 是**同一份内容**
+（单一来源，`AIArena.bridgeJson`）。
+
+**裁判的条目不含 `token`**，只给一句 `tokenHint` —— 它的凭据只从 `ARENA_ADMIN_TOKEN` 读（fail-closed）。
+端点数 36 → **37**。
+
 ## 新端点（2026-10-06）
 
 - **`GET /v1/<agent>/watch?since=<事件序号>`** —— 「值得注意」的**聚合判定**。
