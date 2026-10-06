@@ -594,7 +594,8 @@ PASS 12 / FAIL 0 / SKIP 0
 
 | 待做 | 说明 |
 |---|---|
-| #10 git 提交 | 最后一步（#12 已完成，见「已完成」表） |
+| #10 git 提交 | **已提交**（2026-10-06，4 个 commit 按主题分组）：`feat(mod)` /watch + appliedRot + 凭据 fail-closed + 特权读审计；`feat(drive)` 离线工具 + AGENTS.md；`docs` 全量同步；`chore` BOM + 凭据来源 + 清理封面 + 补脚本。提交后 `git diff` 为空、无意外改动。**未提交**：`drive/` 下 7 个属于另一个项目的文件（见下） |
+| #10 遗留 | `drive/make-cover-{fish,four,night,paper}.py`、`scan-fish-{all,license}.py`、`fish-license-scan.json` —— 谈的是「鲸鱼娘立绘」「蓝色大肥鱼」站的授权扫描，其中夜战版自己写着「**和 Mindustry 毫无关系**」，判为**另一个项目**的东西。**没提交、也没删**，等你决定去处 |
 | #12 观察者 Mod 图形观感 | **已在图形界面实测**（2026-10-06）—— `Loading mod: ai-observer` → 自动连上 `127.0.0.1:6567` → `Received world data`；服务端 `/diag` 的 `fullViewSends=334 / spectatorRouted=334` 证明它在给观察者发全景快照。截图核对：左上角「观战端 / 视角: derelict (全图)」面板 + 三个按钮 + 快捷键帮助 + 小地图，中文完整，并明确标注「只读观战：服务端不会给你任何单位」。**图形回放仍未做**（那是另一件事） |
 | #10 git 提交 | 最后一步 |
 

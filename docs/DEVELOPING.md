@@ -62,9 +62,10 @@ $out = "$r\mod\ai-arena.jar"
 Copy-Item $out "$r\server-run\config\mods\ai-arena.jar" -Force
 ```
 
-**`jar` 的条目数固定是 48**（44 个 `.class` + 1 个 `mod.hjson` + `META-INF/MANIFEST.MF` + 2 个目录项
+**`jar` 的条目数固定是 49**（45 个 `.class` + 1 个 `mod.hjson` + `META-INF/MANIFEST.MF` + 2 个目录项
 `META-INF/`、`aiarena/`）。数目变了说明有文件增删，值得看一眼是不是意外。
-（46 个 class / 47 条目都是旧值；上面那份代码结构此前漏列了 5 个源文件，已补。）
+（46 个 class / 47 条目、44 个 class / 48 条目都是旧值；上面那份代码结构此前漏列过源文件，已补。）
+**别手抄这个数** —— `drive/offline-checks.py` 会把文档里写死的值和真实 jar 比对。
 
 **改完必须重启服务器才生效** —— 服务器不热加载。
 

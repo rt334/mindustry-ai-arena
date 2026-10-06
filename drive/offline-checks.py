@@ -168,6 +168,21 @@ def source_checks() -> None:
     else:
         rec("jar 条目数", "SKIP", "mod/ai-arena.jar 不存在（尚未打包）")
 
+    # --- 文档里写死的 jar 条目数必须与实际一致 ---
+    # AGENTS.md 与 DEVELOPING.md 都写着这个数，加了 Watch.java 后两处一起失真 ——
+    # 「清单要双向维护」这条铁律，现在交给断言替人看管。
+    for rel in ("AGENTS.md", "docs/DEVELOPING.md"):
+        p = ROOT / rel
+        if not p.exists():
+            rec(f"{rel} 存在", "SKIP", "文件不存在")
+            continue
+        claims = re.findall(r"条目数\s*(?:固定|应)?\s*是\s*\**\s*(\d+)", p.read_text(encoding="utf-8"))
+        if not claims:
+            rec(f"{rel} 写了 jar 条目数", "SKIP", "没找到这样的句子（改措辞了？）")
+            continue
+        for c in claims:
+            eq(f"{rel} 写死的 jar 条目数（{c}）", int(c), EXPECTED_JAR_ITEMS)
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="离线断言套件")

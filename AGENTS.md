@@ -32,8 +32,8 @@
 3. **清单要双向维护。** 做了要回填，过时要划掉 —— 否则下一个人会照旧账再核一遍。
 4. **一次只改一个变量。** 铺一片再测，出问题无法归因。
 5. **改 `mod/src/aiarena/*.java` 后必须重新编译部署 + 重启服务器**（不热加载）。
-   编译命令见 `docs/DEVELOPING.md` §二；**jar 条目数应是 48**（44 class + `mod.hjson`
-   + `MANIFEST.MF` + 2 目录项），数目变了说明有文件增删。
+   编译命令见 `docs/DEVELOPING.md` §二；**jar 条目数应是 49**（45 class + `mod.hjson`
+   + `MANIFEST.MF` + 2 目录项），数目变了说明有文件增删 —— **离线断言会替你查这个数**。
 6. **凭据不进模型上下文。** 参赛客户端只用自己的 token（`arena.load_own_token(agent_id)`）；
    **admin 凭据只从环境变量 `ARENA_ADMIN_TOKEN` 读** —— 配置文件里那条已被服务器忽略，
    读不到就不注册 admin（fail-closed）。裁判脚本从环境变量或 `server-run/admin-token.txt` 取。
@@ -72,3 +72,7 @@ $mj = 'C:\dsh\Mindustry-src\desktop\build\libs\Mindustry.jar'
 2026-10-06 已把工作树里 43 个 CRLF 文件统一为 LF —— `git ls-files --eol` 现在 `w/crlf` 应为 0。
 按行匹配的锚点脚本有 101 个，行尾漂移会让它们**静默**失效，所以改完顺手跑一次：
 `git ls-files --eol | Select-String 'w/crlf'`（输出应为空）。
+
+**`git status` 会多报 M，那不是真改动。** `eol=lf` 是个 filter，凡是被改过行尾的文件
+mtime 全变 → `status` 按 stat 报 M，而 `git diff` 是空的。用 `git add -u` 刷新索引即可
+（内容相同，不会产生任何提交内容）。**下结论前先看 `git diff`，别看 `git status`。**
