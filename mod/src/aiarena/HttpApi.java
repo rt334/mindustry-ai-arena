@@ -895,8 +895,21 @@ public final class HttpApi {
 
     // ================================================================ 谓词等待
 
-    /** 同时挂起的 `/await` 上限 —— 每个都在 HTTP 线程上循环，太多会占满线程池。 */
-    private static final int MAX_LIVE_AWAITS = 16;
+    /**
+     * 同时挂起的 `/await` 上限。
+     *
+     * **每个挂起的等待占一个 HTTP 线程**（服务端是每请求一线程），所以这个数必须
+     * 显著小于线程池大小 —— 否则若干个等待就能把整个接口层堵住，连 `/ping` 都排不上队。
+     *
+     * 取线程池的 1/4。这不是拍脑袋：实测过把它设成 16（**恰好等于线程池的默认大小**）时，
+     * 限流**永远不会触发** —— 20 个并发请求的耗时正好是 timeout 的两倍（分两批串行），
+     * 说明线程池先挡住了，await 的计数器根本没机会涨过上限。
+     *
+     * 动态算而不是 `static final`：`httpThreads` 是从配置读的，可能在类初始化之后才变。
+     */
+    private static int maxLiveAwaits() {
+        return Math.max(1, AIArena.httpThreads / 4);
+    }
     private static final java.util.concurrent.atomic.AtomicInteger liveAwaits =
         new java.util.concurrent.atomic.AtomicInteger();
 
@@ -1024,10 +1037,10 @@ public final class HttpApi {
         }
 
         int live = liveAwaits.incrementAndGet();
-        if (live > MAX_LIVE_AWAITS) {
+        if (live > maxLiveAwaits()) {
             liveAwaits.decrementAndGet();
-            respond(ex, 503, Json.error(1007, "too many live awaits (" + MAX_LIVE_AWAITS
-                + " max); retry shortly"));
+            respond(ex, 503, Json.error(1007, "too many live awaits (" + maxLiveAwaits()
+                + " max, = httpThreads/4); retry shortly, or use /watch + /events instead"));
             return;
         }
 
