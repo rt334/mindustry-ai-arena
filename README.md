@@ -43,6 +43,11 @@ AI ──HTTP──→ Mod（服务器内）──引擎 API──→ 世界
 - JDK 17
 - 本仓库的 `mod/ai-arena.jar` 已放到服务器运行目录的 `config/mods/`
 
+**想自己写 AI**：先看 `ai-client.py` —— 示例客户端，用四阶段状态机（建设 / 造兵 /
+推进 / 攻击）完整打完一局，也是 P4「API 够不够让 AI 打完一局」的验收证据。
+接口说明书在 `skill/`（会被拷到 `~/.dsh/skills/ai-arena/`），逐条细节以
+[`docs/API.md`](docs/API.md) 为准。
+
 ---
 
 ## API
@@ -70,28 +75,46 @@ AI ──HTTP──→ Mod（服务器内）──引擎 API──→ 世界
 | `GET /intel` | 敌方核心数据情报（需连续可见 10 秒确认） |
 | `GET /events?since=` | 事件流（游标轮询） |
 | `GET /observe` | 观战信息与可视角队伍 |
+| `GET /block?name=` | 方块定义（成本 / 输入 / 输出 / 尺寸）；不传 `name` 列出全部可放置方块 |
+| `GET /ore?x=&y=` | 指定格的矿脉明细 |
+| `GET /rates?window=` | 资源变化速率（两个时间点的库存差） |
+| `GET /stalls` | 产线异常警报（堵塞 / 缺料 / 满仓 / 电力） |
+| `GET /watch?since=` | **「值得注意」的聚合判定** —— `clear=true` 表示现在没事，可以安心睡到下一次事件 |
+| `GET /drill` | 矿机明细（读 `itemsPerSecond`，别读两位小数的 `lastDrillSpeed`） |
+| `GET /factory` | 单位工厂状态 |
+| `GET /queue` | 建造队列（逐条坐标 / 进度 / `stuckReason`） |
+| `GET /stream?since=&seconds=` | 事件流（SSE 推送，与 `/events` 同一套游标语义） |
+| `GET /maps` | 地图列表与属性 |
+| `GET /database` | 汇总数据库 |
+| `GET /diag` | 服务端诊断计数器（admin） |
 
 ### 写
 
 | 端点 | 说明 |
 |---|---|
 | `POST /place?x=&y=&block=` | 单点建造 |
-| `POST /place?shape=line&x1=&y1=&x2=&y2=&block=` | 批量：`line` / `area` / `rect` / `outline` / `circle` |
+| `POST /place?shape=line&x1=&y1=&x2=&y2=&block=` | 批量：`line` / `area` / `rect` / `outline` / `circle` / `point` / `path` |
 | `POST /break?...` | 拆除（参数同上） |
 | `POST /config?x=&y=&value=` | 修改建筑配置 |
-| `POST /spawn?type=&x=&y=` | 生成单位 |
+| `POST /spawn?type=&x=&y=` | 生成单位（**默认禁用**，须由工厂生产） |
+| `POST /mine?x=&y=[&unit=]` | 让单位挖指定格 |
+| `POST /blueprint?x=&y=&w=&h=` | 蓝图导出；`POST /blueprint?x=&y=&data=` 放置 |
 | `POST /chat?text=` | 发言 |
 | `POST /command?action=move&units=1,2&x=&y=` | 指挥：`move` / `attackUnit` / `assistBuilding` / `setCommand` / `setStance` / `commandBuilding` / `requestItem` / `transferInventory` |
-| `POST /control?op=enter&unit=` | 接管单位：`enter` / `release` / `move` / `fire` |
-| `GET /queue` · `POST /queue?clear=true` | 建造队列 |
+| `POST /control?op=enter&unit=` | 接管单位：`pos` / `move` / `order` / `enter` / `release` / `fire` / `stopmove` / `orders` / `probe` / `ticks`（`warp` 默认禁用） |
+| `POST /queue?clear=true` | 清空全队待办计划 |
 
 ### 裁判（admin token）
 
 | 端点 | 说明 |
 |---|---|
-| `GET /setup?map=&fog=` | 初始化对局 |
-| `GET /maps` | 地图列表与属性 |
-| `GET /record` · `?action=start\|stop\|download` | 录像控制 |
+| `POST /setup?map=&fog=` | 初始化对局（加载地图 + 放核心 + 生成建造单位） |
+| `POST /start` | 解除暂停 |
+| `POST /host` | 打开游戏端口 6567 |
+| `POST /fog?fog=&static=` | 迷雾开关；**不带 `fog` 参数时返回当前** `fog` / `staticFog` / `pvp` |
+| `POST /admin?action=observe&player=` | 在线玩家管理与观战设置 |
+| `POST /record` · `?action=start\|stop\|download` | 录像控制；不带 `action` 返回状态与文件列表，`download` 需 `name=<file>.jsonl` |
+| `GET /diag` | 服务端诊断计数器 |
 | 任意读端点 `&view=all` | 上帝视角 |
 | 任意读端点 `&view=<teamId>` | 指定队伍视角 |
 
@@ -100,8 +123,12 @@ AI ──HTTP──→ Mod（服务器内）──引擎 API──→ 世界
 ```
 1001 bad_request      1002 not_found       1003 out_of_bounds
 1004 queue_full       1005 read_only       1006 cursor_expired
-1007 op_expired       1401 unauthorized    1403 forbidden
-1429 rate_limited     1500 internal_error
+1007 op_expired       1008 place_blocked   1009 place_invalid
+1401 unauthorized     1403 forbidden       1429 rate_limited
+1500 internal_error
+
+1008 -> HTTP 409（footprint 被占，挪一格即可）
+1009 -> HTTP 400（引擎拒绝，重试无意义）
 ```
 
 ---
@@ -246,13 +273,19 @@ private static String[] pvpMaps = {"veins", "glacier", "passage"};
 ## 目录结构
 
 ```
-docs/                    文档
-  DESIGN.md              设计文档（含全部引擎发现与源码引用）
-  API.md                 接口手册
-  ENGINE-NOTES.md        引擎层说明（维护者文档）
+docs/                    文档（索引见 docs/README.md）
+  DESIGN.md              设计文档：架构、对等约束、引擎发现、P0~P7、待验证清单
+  API.md                 接口手册（接口的唯一权威）
+  CONDITIONS.md          条件与事故：能力边界、对等约束定义、越界记录
+  DEVELOPING.md          改接口层的上手文档（编译部署、加端点）
+  ENGINE-NOTES.md        引擎层事实（维护者文档）
+  LESSONS.md             经验教训：判定与核实的陷阱
+  TODO.md                未完成事项与验证债务
   FEASIBILITY.md         目标可行性评估
+  PRODUCTION.md          产线实况（实测速率与布局）
   STRESS-TEST.md         压力测试报告
   PROMPTS.md             提示词与工作流约定
+  place-failure-stats.md /place 失败码实测统计
   phases/                P0~P7 分阶段实现报告
     P0-VERIFICATION.md   技术验证（7 项原型验证）
     P1-IMPLEMENTATION.md 最简闭环
@@ -267,25 +300,40 @@ docs/                    文档
     FEATURE-REQUESTS.md  接口层改进提案
     REVIEW-ADDENDUM.md   对提案的核对与增补
 
+ai-client.py             示例 AI 客户端：读局面 → 决策 → 下指令，完整打完一局
+start.py                 菜单 + 子命令（check / status / play / watch / replay / stop）
 start-arena.ps1          一局启动脚本
+live-match.ps1           服务端 + AI + 观战端
+stress-test.ps1          62 用例压力测试
+watch.py / ws-client.py  接口客户端（轮询 / WebSocket）
+replay/index.html        回放播放器（单文件零依赖，拖入 .jsonl 即播）
 
 mod/                     服务器 Mod
   src/aiarena/
-    AIArenaMod.java      入口
-    AIArena.java         配置 + 鉴权
-    Snapshot.java        只读快照 + 实体差分
+    AIArenaMod.java      入口：配置、事件监听、主线程快照刷新、起 HTTP
+    AIArena.java         配置 + 鉴权 + 限流
+    HttpApi.java         路由与全部端点
+    WsServer.java        WebSocket
     Actor.java           建造 / 拆除 / 配置
     Commander.java       指挥 + 范围约束
     Operations.java      批量形状 / spawn / chat
-    Shadow.java          影子 Player 池
-    Intel.java           核心数据确认状态机
+    Snapshot.java        只读快照 + 实体差分
+    StallWatch.java      停机判定与计划进度
     EventLog.java        事件流
     Recorder.java        录像器
+    Intel.java           核心数据确认状态机
+    VisionTracker.java   视野跟踪
+    RateTracker.java     产率采样
+    Audit.java           审计日志（只记会改变世界的动作）
+    Diag.java            运行时诊断
+    Shadow.java          影子 Player 池
     Json.java            零依赖 JSON 输出
-    HttpApi.java         路由与全部端点
 
-observer/                客户端观察者 Mod
+observer/                客户端观察者 Mod（图形回放，未完成）
   src/aiobserver/ObserverMod.java
+skill/                   接口说明书 + Python 客户端库（拷到 ~/.dsh/skills/ai-arena/）
+drive/                   开发期脚本与验证脚本（不是产品的一部分）
+server-run/              服务器运行目录（含 token 配置，不入版本控制）
 ```
 
 ---
@@ -321,7 +369,12 @@ jar cf ai-observer.jar -C classes . && jar uf ai-observer.jar observer/mod.hjson
 
 **未完成**：客户端图形回放（加载录像 → 时间线拖动 → 重建世界状态）。需要替换 `Vars.world`，是独立的渲染层工程；服务器侧的录制、存储、下载均已就绪。
 
-**未验证**：客户端观察者 Mod 的图形观感（相机手感、UI 布局）需要在图形界面里实际操作才能评估。
+**已实测（2026-10-06）**：客户端观察者 Mod 在图形界面里跑通过 ——
+`Loading mod: ai-observer` → `Connecting to server: /127.0.0.1:6567` → `Received world data`，
+服务端 `/diag` 显示 `fullViewSends=334 / spectatorRouted=334`（正在给观察者发全景快照）。
+截图核对：左上角「观战端 / 视角: derelict (全图)」面板、三个按钮、快捷键帮助与小地图都正常，
+中文完整，并明确标注「只读观战：服务端不会给你任何单位」。
+（**图形回放仍未做** —— 见上一条。）
 
 ---
 

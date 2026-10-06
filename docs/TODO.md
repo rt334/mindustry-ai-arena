@@ -83,15 +83,19 @@
 **仍未做**：`builds[].items`（能看出谁堵了，画面信息量更大）、sprites 渲染
 （现在是最简的色块+字母档）、长时间录像的滚动加载（目前全量解析进内存）。
 
-### 2.2 设计文档承诺但没实现
+### 2.2 设计文档承诺的项（落地状态）
 
 | 项 | 来源 | 现状 |
 |---|---|---|
-| SSE 推送 | DESIGN.md 41/731/853 三处写「SSE 推给观察者」 | **已实现（未运行时验证）**：`GET /v1/{agent}/stream?since=&limit=&seconds=`，与轮询共用同一套游标语义、复用 `Ev.toJson()`，带心跳与并发上限。**只验到编译通过** —— 本轮未启游戏，实际行为没跑过。 |
-| 蓝图导入 | DESIGN.md 402–426 给了 `readBase64` → 逐格 `BuildPlan` 的路径 | **已实现（未运行时验证），但换了格式**：`GET/POST /v1/{agent}/blueprint`，用我们自己的显式 JSON（base64 装在 `data=` 里），**不是 `.msch` 二进制**——没有参考实现时照猜写解析器，只会产出「看着像对、其实错位」的东西。`.msch` 读取器仍未实现。 |
-| 端口发现文件 | DESIGN.md 704–715 | `bridge-<agentId>.json` 零实现，且与固定的 `port: 7199` 冲突 |
-| 审计日志 | DESIGN.md 684「记录发起者/时间/目标格，供回放与仲裁」 | 只有限流，没有审计 |
-| 写队列每 tick 预算 | DESIGN.md 662 要求「参考 MindustryX 的 1ms」 | 无 |
+| SSE 推送 | DESIGN.md 41/731/853 三处写「SSE 推给观察者」 | **已实现且已实机验证**（见 §八）：`GET /v1/{agent}/stream?since=&limit=&seconds=`，与轮询共用同一套游标语义、复用 `Ev.toJson()`，带心跳与并发上限。`hello`/`ev`/`cursor`/`end` 四种事件实测全部收到。 |
+| 蓝图导入 | DESIGN.md 402–426 给了 `readBase64` → 逐格 `BuildPlan` 的路径 | **已实现且已实机验证（往返保真 4/4，见 §八），但换了格式**：`GET/POST /v1/{agent}/blueprint`，用我们自己的显式 JSON（base64 装在 `data=` 里），**不是 `.msch` 二进制**——没有参考实现时照猜写解析器，只会产出「看着像对、其实错位」的东西。`.msch` 读取器仍未实现。 |
+| 端口发现文件 | DESIGN.md 704–715 | **已实现且已实机验证**（见 §八）：`bridge-<agentId>.json`，内容 `{"agent":…,"apiVersion":"1.4","httpPort":7199,…}`。原先记的「与固定 7199 冲突」不再成立 —— 文件是给外部发现用的，端口仍由配置固定。 |
+| 审计日志 | DESIGN.md 684「记录发起者/时间/目标格，供回放与仲裁」 | **已实现且已实机验证**（见 §八，`Audit.java`）：写 `server-run/ai-arena-audit.jsonl`，`/place` 记、`/map` 不记（只记写操作）。 |
+| 写队列每 tick 预算 | DESIGN.md 662 要求「参考 MindustryX 的 1ms」 | **已实现且已实机验证**（见 §八，`drive/verify-write-budget.py`）：超预算按 tick 拒绝。24 线程 × 8s 并发写、放宽限流后触发 47 次 `(504, 1007) write queue budget exhausted for tick N (1.0 ms/tick)`。 |
+
+> **这一节原先叫「设计文档承诺但没实现」**，五行里有四行当时确实没做。第 12–19 轮补齐后
+> 只剩 `.msch` 读取器（已在蓝图行注明），**结账证据在 §八**。
+> 与 [LESSONS.md](LESSONS.md) §1.3 同源：做了要回填，否则下一个人会照旧账再核一遍。
 
 ### 2.3 从 meow-ai-arena 学来、我们还没有的
 
@@ -99,15 +103,31 @@
 |---|---|---|
 | 一键挑战 | `challenge.py`：拖入 `.cpp` → 跑 `plan/run/rate` → 出排名 | 无 |
 | 零依赖上手 | `start.py` 菜单，「看回放只需要浏览器」 | **已做**：根目录加了 `start.py`（菜单 + 子命令：check/status/play/watch/replay/stop）。**报告事实不猜** —— 前置检查逐项说清检查了什么、结果是什么，缺什么直说缺什么；`status` 会同时报端口、java 进程、tick、apiVersion。回放页本就是单文件零依赖，`replay` 子命令直接开浏览器。 |
-| 多局排名 | Bradley–Terry，`arena/bt.py` 4 KB 纯 Python 可直拷 | 无（见 §六 的理由） |
+| 多局排名 | Bradley–Terry，`arena/bt.py` 4 KB 纯 Python 可直拷；第 3 集跑了 32010 局 | 无（见 §六）。**这里补一条容易被忽略的前提**：meow 能跑万局，是因为 bot 是**本地独立进程 + 离散回合引擎**；ai-arena 是**实时游戏**（60 tick/s，单局分钟级），同量级的局数不现实 —— 「不做排名」的理由是这个，不只是「单局时长」 |
 | 溯源命名 | bot 目录 `模型@工具#编号`，表格带 SHA-256 | **已做**：录像 `meta` 头加 `apiVersion`（与录像格式的 `version` 是两个东西）；命名约定、`MANIFEST.json` 该有什么、成绩表该带哪两列（`sha256` + `apiVersion`）写进 `DEVELOPING.md`「溯源命名」。 |
 | 条件与事故记录 | `CONDITIONS.md` 四段骨架 | **已建** ✓ 见 [CONDITIONS.md](CONDITIONS.md) |
+| **固定强度参照（锚点）** | 每集有出题方写的陪练 bot（`tournament/sparring.cpp`，记作 `anchor-sparring`）作为**固定锚点**参加正式赛，分数以它锚定 0；选手包另有 `workspace/anchors/`（random / greedy）供自测 | 无。`ai-client.py` 只证明「API 够让 AI 打完一局」（P4 验收），它从没被当作参照用，也没有第二个参照 |
+| **可复现的局面** | 每局带 `map_seed`；赛程先冻结成文件，走 `plan` → `run`（可中断续跑）→ `rate` | **已判为不需要**（见 §六）：地图确实每局重随，但**总资源量不变**，所以换局成绩仍可比。「布局不能写死」是另一回事 —— 那条说的是脚本能否复用坐标（[PRODUCTION.md](PRODUCTION.md) §一） |
+| **起始位置的公平轮换 + 赛程自审** | `schedule.py` 在每张图上把座位**完整轮换一圈**（k 人组打 k 局）以抵消座位优势；`audit()` 自检出场 / 座位 / 交手是否均衡 | **已判为不需要**（见 §六）：主路径是**用官方 PvP 图自带的核心**（位置对称），`findCoreSpot + layCoreZone` 只是核心数量不够时的**回退**（`P1` §5.2），不是主路径 —— 原先「位置优势」的说法站不住 |
+| **回放可校验** | `verify_replay.py` 从 `seed + actions` 重算整局、逐帧比对，并**强制引擎版本一致**（`version != VERSION` 直接拒） | 手段不通用：ai-arena 录的是**快照流**，不是可重算的 seed+输入。现有 `drive/verify-player.js` 只证「能重建」，不证「录像与实际一致」 |
+| **成绩的多种视图** | `ratings.json` / `ratings.md` / `pairwise-winrate.csv` / `player-stats.csv` / `games.jsonl.gz` / `summary.md`，另有与历史版本对比的 `vs-original-2600.md` | 无。只有录像 jsonl |
+| **纵向比较要固定对手池** | 版本演化实验：重放每位选手的历史版本，**只与固定对手池同局、彼此不相遇**，看「交卷版是不是最强」。结论反直觉 —— 多数模型的交卷版**不是**最强（中途冲高再回落） | 无。ai-arena 现在连单局成绩都不可复现，纵向比较无从谈起 |
+| **回放选片的诚实原则** | `replays/` 只取「指定对阵或人数里的典型一局，**不挑反杀**」 | 无对应约定。`reviews/` 与录像的选片没有规则 |
+
+> 上表按 `chen-006/meow-ai-arena` 的 `main` 分支（**仓库快照 2026-10-05**）**一手核对** ——
+> 读的是仓库原文与脚本，不是转述。其中「锚点」「可复现局面」「起始位置公平」三条
+> 与 §六「不做多局排名」并不冲突：它们要解决的是**单局成绩能不能复现**，
+> 不是要不要排名。
+>
+> 完整的对照（含另一个项目 `yzi1b/whale-craft`、以及「不抄什么、为什么」）见
+> [`PRIOR-ART.md`](PRIOR-ART.md)。本表只留「我们缺什么」这一列。
 
 ### 2.4 上线相关的缺失
 
-- **没有 CHANGELOG**：提交历史即变更记录，但缺一份面向使用者的「接口改了什么」摘要
-- **没有面向开发者的上手文档**：根 README 面向「用 AI 玩」，缺「怎么改接口层 / 怎么加端点」
-- **观察者 Mod 的图形观感从未评估**：编译通过、结构核对过，但没人真的在图形界面里看过
+- ~~**没有 CHANGELOG**~~ → **已做**：根目录 [`CHANGELOG.md`](../CHANGELOG.md)，按主题分组、面向使用者的「接口改了什么」摘要
+- ~~**没有面向开发者的上手文档**~~ → **已做**：[`DEVELOPING.md`](DEVELOPING.md)（代码结构、编译部署、加端点、验证铁律）
+- ~~**观察者 Mod 的图形观感从未评估**~~ → **已实测**（2026-10-06）：mod 加载 → 自动连接 → 收世界数据，
+  服务端 `/diag` 的 `fullViewSends` / `spectatorRouted` 计数在涨，截图核对 UI 布局与中文均正常。见 §九 #12
 
 ---
 
@@ -119,12 +139,13 @@
 
 | 项 | 说明 |
 |---|---|
-| **`/intel` 状态机** | **已定位前置，仍未验通**。实测把 gamma 开到敌方核心 5 格外，周边 31x31 的 `visible=0` —— **gamma 的 fogRadius 是 0**（`ENGINE-NOTES` §二十八：只有 6 个快速飞行单位被显式设为 0，gamma 是其中之一），跑得快但看不见。所以「必须有 fogRadius>0 的单位」这条依赖是真的，链子是 煤+沙 → 硅冶炼厂 → air-factory → `poly`。**当初的判断没错，是我中途想当然以为 gamma 能看见、白试了一轮。** 复现脚本 `drive/verify-intel.py`（它会自己报「前置不成立」）。原始说明：需要单位在敌方核心视野内**连续 10 秒（600 tick）**。它是对等约束里唯一被承认的「刻意偏离」的支撑，**却从没跑通过**。实测各队核心相距 228 格、视野只有 61，开局必然全是 `unknown` |
+| **`/intel` 状态机** | **2026-10-06 首次跑通** ✅。历史：把 gamma 开到敌核心 5 格外，周边 `visible=0` —— 它 `fogRadius = 0`（`ENGINE-NOTES` §二十八：56 个单位里只有 6 个被显式设为 0），跑得快但看不见，所以「必须有 `fogRadius>0` 的单位」这条依赖是真的。**但验证状态机不必先把产线做出来**：带 `-Darena.allowspawn=true` 起服务器，裁判用 `spawn?type=poly&team=` 直接把它放到敌核心旁即可。实测轨迹 `33 → 156 →[归零]→ 91 → 372 →[归零]→ 565 → confirmed`，快照拿到 `{"copper":500,"lead":500}`。同时补上两件此前没记的事：**接口是三态**（多一个 `scouting`）、**30 tick 容差会被突破**（实际耗时是理论 10 秒的数倍）。脚本 `drive/verify-intel.py` 已改成可复现形态 |
 | **`/queue?clear=true` 非零清空** | 实测只拿到 `cleared 0` |
 | **60 计划上限的触发分支** | 实测峰值 `plans=49`，没撞到上限 |
 | **`stuckReason` 的 `builderTooFar`** | **已实测**。`drive/bootstrap.py` 在一张新图上布线时，远端的计划全部卡在这个原因上，带具体数字：
 `(298,109) conveyor: builderTooFar: 232px away, buildRange 220`、`(294,128) mechanical-drill: builderTooFar: 325px away, buildRange 220`。**`buildRange = 220px = 27.5 格`** —— 这也直接回答了「建造单位射程是不是被放大过」：**没有**，27.5 格是引擎的常规值（`widenBuilderRange` 已停用，见 AIArena.java 注释）。 |
 | **`cursor_expired`（410）路径** | 事件游标被环形缓冲淘汰时才会走到 |
+| **`/block?name=` 的 `requirements`** | **已定论：字段是好的**（2026-10-06 实测）—— `/block?name=sorter` 返回 `{"copper":2,"lead":2}`，物品名与数量都对。原先那条「序列化坏了、每项都是 `x`」的笔记**被推翻**（[ENGINE-NOTES](ENGINE-NOTES.md) §十五 已改）。**查配方可以用它了。** |
 
 ### 3.2 只验过一部分
 
@@ -143,12 +164,58 @@
 - **真实 AI 对局**：压测用的是脚本化 HTTP 调用，不是真的决策循环
 - **录像完整性**：~~文件写入验过，能不能还原成完整对局没验~~ → **已验**。`drive/verify-player.js` 用两套互不相干的算法对账（Map 覆盖+删除 vs 集合差），并抽查 checkpoint 重建与从头重放是否等价。实测一份覆盖全分支的录像（建 5 条带子、拆 2 条、再建 2 条）：11 个 key、拆 2 个 → 最终 9 个建筑，两套算法一致
 
-**另**：压测当时覆盖 18 个端点，**现在 33 个** —— 新增的那些（`/block` `/maps` `/observe` `/command` `/mine` `/rates` `/stalls` `/ore` `/drill` `/factory` `/database` `/queue` `/fog` `/admin` `/spawn` `/control` `/block`）**没被并发压过**。
+**另**：压测当时覆盖 18 个端点，**现在 36 个**（构成见 [DESIGN.md](DESIGN.md) §6.1）—— 新增的那些（`/block` `/maps` `/observe` `/command` `/mine` `/rates` `/stalls` `/watch` `/ore` `/drill` `/factory` `/database` `/queue` `/fog` `/admin` `/spawn` `/control` `/stream` `/blueprint`）**没被并发压过**。
 
 ### 3.4 快照
 
 **频率与体积从未实测**。只有 10 秒 / 18 行的短测，「约 45 MB/小时」是按快照间隔估的。
 长局（小时级）的存储成本与刷新延迟都是未知数。
+
+### 3.5 验证手段本身的结构问题
+
+**所有验证都要起服务器或起游戏** —— 这才是债务会累积的根因：成本高，于是「下次再验」，
+于是清单越来越长。可离线断言的部分其实不少，它们**不需要游戏**：
+
+| 可离线断言 | 在哪 |
+|---|---|
+| JSON 转义与响应信封（`{ok:true,data}` / `{ok:false,code,error}`） | `Json.java` |
+| 错误码 → HTTP 状态码映射 | `HttpApi.statusFor` |
+| 参数解析（缺参 / 未知值 / 默认值） | `Params` |
+| 多格方块的坐标换算（中心 ↔ 左上角，`sizeOffset`） | 纯函数，设计上就该测 |
+| `/place` 的响应装配（`materials` / `buildTime` / `mode:transfer`） | `Actor.place` 的返回体 |
+| 蓝图 JSON 编解码与 base64 往返 | `HttpApi` 蓝图段 |
+| 录像 JSONL 结构（`meta` / `snap` / `removed` / 版本号） | `Recorder` |
+| `Intel` 的确认窗口状态机（600 tick ± 30 容错） | `Intel.java` |
+
+**对照**（`yzi1b/whale-craft`，DSH 插件；仓库快照 2026-10-05）：它的 `selfcheck.mjs` 有
+**600+ 条离线断言** —— 用假 ctx 加载**真的** `apply()`，不连 Minecraft 服务器；
+另有 `check-core.mjs` 做全树语法 + 动态 import + 私有字段一致性。
+回归成本因此极低，可以每次改动都跑。**这个项目此前缺的正是这一层。**
+
+> **已补（2026-10-06）**：`drive/offline-checks.py` —— 69 项断言、**不需要起游戏**、退出码可用于 CI。
+> 一半是「文档与代码是否一致」的回归检查（端点数量、错误码集合、`shape` 取值、jar 条目数），
+> 另一半直接调 `aiarena` 的真代码（JSON 转义 / 响应信封 / 审计判定 / token / 状态码映射）。
+>
+> 它自己也被验证过：写完先**故意造错让它红**，确认不是假绿 ——
+> 过程中还真抓到两条**我写错的断言**（DESIGN 裁判段用的是 `/v1/{referee}/`、`shape` 那条
+> 错误消息在源码里跨行）。又一次印证 [LESSONS.md](LESSONS.md) §2.1。
+
+**另一件应该先统一的事：行尾。** `.gitattributes` 声明 `* text=auto eol=lf`、
+`*.md text eol=lf`、`*.java text eol=lf`，但工作树里实测是混合的：
+
+```
+README.md            CRLF=451    裸LF=0
+HttpApi.java         CRLF=4563   裸LF=0
+skill/SKILL.md       CRLF=205    裸LF=0
+docs/LESSONS.md      CRLF=0      裸LF=160    ← 符合声明
+drive/fix-api-md.py  CRLF=0      裸LF=146    ← 符合声明
+```
+
+而 `drive/` 下有 **101 个**脚本做按行匹配的锚点替换（`fix-*.py` / `doc-*.py`）。
+**同一批脚本对两种行尾的文件行为不一致** —— [`LESSONS.md`](LESSONS.md) §1.2 那类
+「锚点命中 0」的坑，根因很可能就在这里。处置二选一：把工作树统一成 LF
+（`git add --renormalize .`；仓库侧本来就是 LF，不会改变已提交内容），
+或者反过来改 `.gitattributes` 承认 CRLF 现状。**别保持现在这样。**
 
 ---
 
@@ -166,10 +233,11 @@
 
 | 项 | 状态 |
 |---|---|
-| 服务器 | **停着** |
-| 最新 mod | 已编译部署（含 `stuckReason`）—— **需要重启才生效** |
+| 服务器 | **停着**（7199 未监听、无 java 进程） |
+| 最新 mod | 已编译部署 —— 含 `stuckReason`、**审计特权读 + 补记 `host`/`start`/`fog`**、**admin 凭据 fail-closed**。**需要重启才生效**；其中后两项**只有静态验证**（编译 + 部署 + 语法检查），见 §八 |
+| admin 凭据 | 已改为 fail-closed：服务器只认环境变量 `ARENA_ADMIN_TOKEN`，配置文件里那条明文被忽略。四个启动/裁判脚本会在启动服务器前自动准备并设进环境变量（兜底文件 `server-run/admin-token.txt`） |
 | 游戏局面 | 被测试残留污染（几十条测试带子、几个冶炼厂、一台孤立的钻机） |
-| git | `main` 与远端同步 |
+| git | **有未提交改动**：22 个文件修改 + `AGENTS.md`、`docs/PRIOR-ART.md` 两个新文件；另有 `docs/images/` 两张封面被删、`drive/` 下 12 个未跟踪脚本待处置（见 §9.4） |
 | 磁盘 | 清理过一轮，63.7 MB → 18.7 MB |
 
 ---
@@ -188,6 +256,12 @@
 | **物流归属判断**（「哪些邻格属于其他资源的干线、会不会混料」） | 按「暴露规则可以、暴露结论越线」的标准：让服务端指出「这条带子属于谁、你会不会灌错料」是**结论**，属于 AI 该自己推的事，替它推等于代打。同一标准下**可以做**的是「每台钻机实际往哪几格推货」——那是**规则**，与 `acceptsFrom` / `sendsTo` 同级，见 §7.9 |
 | **反向提示系统** | 会额外给 AI 免费情报，违反对等约束 |
 | **HTTP 监听 `0.0.0.0`** | 只绑 `127.0.0.1`，远程接入需自备隧道 |
+| **起始位置轮换**（原 §9.1 #1） | 官方 PvP 图**自带的核心出生位置基本是公平的**；`findCoreSpot + layCoreZone` 只是核心数量不够时的**回退**路径（`P1-IMPLEMENTATION.md` §5.2），不是主路径 —— 原先「位置优势」的说法站不住 |
+| **锚点 AI + 固定地图集**（原 §9.2 #4） | 地图每局重随是真的，但**总资源量不变** ⇒ 换局成绩仍可比。与「坐标不能写死」（`PRODUCTION.md` §一）是两回事：前者是**统计可比性**，后者是**脚本能否复用坐标** |
+| **凭据边界继续收紧**（原 §9.1 #2，**暂缓**） | 短期已经做过（fail-closed + 审计留痕 + skill 不再演示取 admin）；再往下（参赛 token 全走环境变量、admin 与参赛 token 分文件 + ACL）**不好配置**，性价比不划算。**暂缓，不是不做** |
+
+> **「还没决定的」不在这一节** —— 它们集中在 **§九「需要判断的事」**。
+> 两节是一对：这里是**已经决定不做**的，那里是**等你定**的。
 
 ---
 
@@ -274,7 +348,7 @@
 | # | 复盘的说法 | 现状 |
 |---|---|---|
 | 1 | `acceptsFrom` 没有任何实现 | **已实现**。`Snapshot.java:499` `acceptsFrom = conveyorInputs(b)`，`HttpApi` 用 `if (b.acceptsFrom != null) o.putRaw("acceptsFrom", ...)` 输出。核对时若抽样的第一个建筑是核心（非 conveyor），该字段本就是 null 故不输出，**别据此判定「没实现」** —— 要看带子。 |
-| 2 | 钻机往哪几格推货查不到 | **已做完**。输出格：`Snapshot.java:501` `sendsTo = drillOutputs(b)`。锚点差异：`Actor.place` 的返回体现在带 `appliedRot` / `anchorX` / `anchorY` / `size` —— 多格方块在引擎里按**左上角**定位而接口给**中心**（`sizeOffset = -((size-1)/2)`），与其让每个 AI 自己推这个偏移，不如把换回来的结果直接给出。**未运行时验证。** |
+| 2 | 钻机往哪几格推货查不到 | **已做完**。输出格：`Snapshot.java:501` `sendsTo = drillOutputs(b)`。锚点差异：`Actor.place` 的返回体现在带 `appliedRot` / `anchorX` / `anchorY` / `size` —— 多格方块在引擎里按**左上角**定位而接口给**中心**（`sizeOffset = -((size-1)/2)`），与其让每个 AI 自己推这个偏移，不如把换回来的结果直接给出。**已于 2026-10-06 实机验证**，并顺带修掉 `appliedRot` 只回显传入值的缺陷（见 §9.5③）。 |
 | 3 | `/queue` 只给数量不给坐标与进度 | **已实现**。`Operations.java:447-483` 每个计划带 `x` / `y` / `block` / `breaking` / `constructing` / `progress` / `stuckSeconds` / `stuckReason` / `hint` —— 坐标、进度、卡住原因都有。复盘那条是旧状态。 |
 | 4 | `/units` 缺「当前在建哪个方块」 | **已实现**。`HttpApi.java:4239` 给 `buildingAt: {x, y, progress, block}`，正是复盘要的那四个字段。 |
 | 7 | `/place` 的 `config` 参数无效 | **已修，而且代码里记着这条教训**。`Actor.java:134-141` 专门把字符串 config 解析成引擎对象，注释写明：`BuildingComp.configured()` 按 `value.getClass()` 查 `block.configurations`，**直接传 String 一律匹配不上，配置会静默失效**（方块建出来了，config 是空的）。正是从复盘那次踩坑学到并修掉的。（同一行的「sorter `rotation` 回读恒 0」是条目 11，仍待实机确认。） |
@@ -346,7 +420,7 @@ PASS 12 / FAIL 0 / SKIP 0
 | 录像 `meta.apiVersion` | **实机验过** | 首行 `{"t":"meta","version":2,"apiVersion":"1.4",...}` |
 | SSE `/stream` | **实机验过** | `hello` / `ev` / `cursor` / `end` 全部收到，468 字节 |
 | 蓝图导入/导出 | **实机验过** | 导出 count=4；导到确认过的空地 **placed 4/4**，3 条带子 + 1 个 router 以正确的相对位置与方块名重建（`verify-blueprint-roundtrip.py`） |
-| `/place` 的 `appliedRot` / `anchorX/Y` / `size` | 只编译过 | 本脚本没覆盖，仍是待验 |
+| `/place` 的 `appliedRot` / `anchorX/Y` / `size` | **实机验过**（2026-10-06） | 六组环绕值与 `/buildings` 回读逐条一致；期间修掉 `appliedRot` 只回显传入值的缺陷 |
 | 写队列每 tick 预算 | **实机验过** | 24 线程 × 8s 并发写，放宽限流后触发 47 次 `(504, 1007) write queue budget exhausted for tick N`，消息与设计一致（`verify-write-budget.py`） |
 
 ### 两项补充验证（已做完）
@@ -389,7 +463,7 @@ PASS 12 / FAIL 0 / SKIP 0
 > 如果只看到「没触发 1007」就记成「功能可能有问题」，会得到完全错误的结论；
 > 如果看到「没触发」就记成「通过」，那就是假绿表。**必须先确认瓶颈在哪一层。**
 
-### 这个脚本自己犯的三个错（都已修）### 这个脚本自己犯的三个错（都已修）
+### 这个脚本自己犯的三个错（都已修）
 
 写 `verify-all.py` 的过程中踩了三次，都是「看起来是功能坏了，其实是脚本错了」：
 
@@ -415,3 +489,154 @@ PASS 12 / FAIL 0 / SKIP 0
 7. 并发打写请求，看写队列预算是否按 tick 拒绝
 
 **前六项都是一分钟以内的事**；只有第 7 项需要造负载。
+
+---
+
+### 文档与源码的一致性核对（2026-10-05 · 无游戏环境也能做）
+
+一次**纯静态**核对：全部以 `mod/src/aiarena/` 的源码为准，不需要启游戏。
+
+| 项 | 文档原值 | 源码实际 | 处理 |
+|---|---|---|---|
+| HTTP 端点总数 | 33 | **35**（34 个 `/v1/` action + `/ping`） | 已改 DESIGN §6.1；P7 与压测报告里的 33 标为「当时的快照」 |
+| `/block` 语义 | 单格详情 `?x=&y=` | **按 `name=` 查方块定义** | 已改（DESIGN、README） |
+| `/control` 的 op | 8 个 | **11 个** —— 多 `move` / `probe` / `ticks` | 已改 DESIGN、API、README、SKILL |
+| `shape` 取值 | 5~6 种 | **7 种** —— 多 `point` / `path` | 已改 DESIGN、README、SKILL |
+| `jar` 条目数 | 47（46 class） | **48**（44 class + `mod.hjson` + `MANIFEST.MF` + 2 目录项） | 已改 DEVELOPING |
+| `HttpApi.java` 行数 | 4200 | **4563** | 已改 DEVELOPING |
+| 代码结构清单 | 13 个文件 | **18 个**（漏 `Audit` / `Diag` / `Json` / `Shadow` / `AIArenaMod`） | 已补 DEVELOPING |
+| `limits` / 限流 / 线程池 / SSE 并发 / `apiVersion` | 4096·200·60 / 60·200 / 16·128 / 8 / `1.4` | **逐项一致** | 无需改 |
+
+**两项独立交叉验证**（结论互相印证，不是同一份数据的两种说法）：
+
+1. 按 DEVELOPING §二 的命令实测 `javac`：**退出码 0、2 秒、产出 44 个 class**，
+   与 `mod/ai-arena.jar` 里的 44 个 `.class` 逐名比对**完全一致**。
+2. `mod/ai-arena.jar` 的 mtime 比最新源码（`Actor.java`）**晚 15 秒**，部署副本同时间戳
+   ⇒ 部署是同步的，**改完只需重启服务器**（服务器不热加载）。
+
+**遗留一条**：`Snapshot.java:411` 用了已过时的 `UnitType.ammoCapacity`
+（`javac -Xlint:deprecation` 全场唯一警告，不影响编译）。
+它给 `/units` 提供弹药容量字段，换新写法得先查 `UnitType` 源码确认替代 API ——
+**不猜**，所以只记不改。
+
+### 本轮代码改动（审计 + 凭据边界）
+
+| 改动 | 验证程度 | 证据 |
+|---|---|---|
+| `Audit` 记特权读（带 `view=` 的请求 → `privileged:true`） | **实机验过** | 审计新增 `{"agent":"referee","team":0,"method":"GET","action":"state","query":"view=all","privileged":true}` |
+| `Audit` 补记 `host` / `start` / `fog` | **只编译过** | 本次没触发这三个动作（要先走 setup / host / fog 流程） |
+| `AIArena` 的 admin 凭据 fail-closed（只从 `ARENA_ADMIN_TOKEN` 读） | **实机验过** | 见下面的单变量对照 |
+| `arena.load_own_token` / `load_admin_token` | 语法通过 | `py_compile` 退出码 0，两个函数都在 |
+| 四个 `.ps1` 的凭据来源改造 | 语法通过 + BOM 已对齐 | PowerShell Parser 解析 OK；四个文件首三字节都是 `EF BB BF` |
+
+**fail-closed 的单变量对照**（同一份配置、同一份代码，只改环境变量）：
+
+| | 无 `ARENA_ADMIN_TOKEN` | 带 `ARENA_ADMIN_TOKEN` |
+|---|---|---|
+| 加载数 | **`loaded 4 agent(s)`** | **`loaded 5 agent(s)`** |
+| 日志 | 「agent 'referee' 标了 admin，但没有可用的 admin 凭据 —— 已跳过」+ fail-closed 说明 | 正常注册 `Agent(referee, team=0, admin=true)` |
+| `GET /v1/referee/state?view=all` | — | `ok=True` |
+| 收尾 | `java 残留 0`、`7199 已释放` | 同上 |
+
+两次都把服务器停干净了（按约定，不留残留进程）。
+
+> 补验方式见 §9.5 —— 起一次服务器，三种情形一起验完（约一两分钟）。
+
+---
+
+## 九、待定事项与决定记录
+
+> 与 **§六「明确不做的」** 是一对：**§六 收已经决定不做的，这一节收决定记录 + 还没定的。**
+> 下面是决定摘要；9.1–9.5 保留原始背景，供日后回看「当时依据什么判断」。
+
+### 决定摘要（2026-10-06）
+
+| # | 事项 | 决定 |
+|---|---|---|
+| 1 | 起始位置轮换 | **不做** —— 已移入 §六 |
+| 2 | 凭据边界继续收紧 | **暂缓** —— 已移入 §六（不好配置） |
+| 3 | 权限分级 | **未定** |
+| 4 | 锚点 AI + 固定地图集 | **不做** —— 已移入 §六 |
+| 5 | 离线断言层 | **做** |
+| 6 | 行尾统一 | **做**（统一为 LF） |
+| 7 | 「值得注意时唤醒」 | **做** |
+| 8 | `docs/` 可检索化 | **做** |
+| 9 | 边界升级为格式 + 命名 | **做** |
+| 10 | git 提交范围 | **做** |
+| 11 | `live-match.ps1` 补 BOM | **做** |
+| 12 | 观察者 Mod 图形观感 | **做**（需起客户端） |
+| 13 | 修 `verify-p1.py` 的键名 | **做** |
+| 14 | 「单位自主交战」写进 ENGINE-NOTES | **做**（先补源码确认） |
+
+**执行顺序与依赖**：
+
+- **#6 行尾统一放最先** —— 它影响之后所有编辑，否则每改一次都要重新踩行尾。
+- **#7 / #8 / #9 共享同一个前提**：参赛 AI 是否为 DSH agent（若是，那两个参考项目的机制可直接用）。
+- **#12 与 §9.5 的四项实测都要起游戏** —— 按约定，做完必须关掉，不留残留进程。
+- **#10 git 提交放最后** —— 等前面的改动都落地再一起提交，避免半成品入库。
+
+**执行进度（2026-10-06）**：
+
+| 已完成 | 说明 |
+|---|---|
+| #6 行尾统一 | 43 个文件 CRLF → LF（保留各自 BOM）；转换前后 `git diff --stat` **逐字不变**（679 / 95）；全仓 228 个受跟踪文本文件现在都是 LF |
+| #11 `live-match.ps1` 补 BOM | 四个 `.ps1` 现在都有 BOM，语法全过 |
+| #13 修 `verify-p1.py` 键名 | `requirements` → `cost`（原来那行永远打印 `None`） |
+| #14 单位自主交战 | 源码确认（`UnitType.autoFindTarget`、`CommandAI.updateTargeting`）→ 已写进 [ENGINE-NOTES](ENGINE-NOTES.md) §三十二。**附带发现**：PvP 里没有「被打自动还手」（`CommandAI.hit()` 要求 `team.isAI()`） |
+| §9.5① 审计特权读 + admin fail-closed | **实机验过**，单变量对照（4 vs 5 agents）见 §八 |
+| §9.5③ `/place` 的 `appliedRot` / `anchor` | **实机验过，并修掉一处缺陷** —— `appliedRot` 此前只回显传入值，已归一化；六组环绕值与 `/buildings` 回读逐条一致。见 [CHANGELOG](../CHANGELOG.md)「接口修正」 |
+| §9.5④ `/block?name=` 的 `requirements` | **实机验过：字段是好的** —— 旧笔记被推翻，[ENGINE-NOTES](ENGINE-NOTES.md) §十五 已改 |
+| §9.5② `/intel` 端到端 | **实机跑通（首次）** —— 用裁判 `spawn?team=` 绕开产线；确认后拿到敌方核心库存。三态与容差观察已补进 [DESIGN](DESIGN.md) §6.2 |
+| #7 「值得注意时唤醒」（服务端半边） | **新增 `GET /v1/<agent>/watch`**（端点数 35 → 36）：把停机 / 队列停滞 / 新事件合成**一个 `clear` 判断** —— 客户端据此决定「能不能睡」。实测单变量对照：刚开局 `clear=true`；造一个缺料建筑后 `clear=false, reasons=[stalls], counts.stalls=1`，与 `/stalls` 的 `stalledCount=1, kind=missingInput` 吻合。**只聚合不新增信息**（不解释「为什么堵」「该改哪一格」） |
+| #8 `docs/` 可检索化 | 新增 `drive/docs-index.py` —— 25 份 / 8995 行现在可以**按节取**（`--grep` 找节、`--read "文件.md#节标题"` 取那一节、`--json` 给 agent 解析），不必整份读 |
+| #9 边界升级为格式+命名 | 新增 `drive/check-boundary.py` —— 5 条违规规则（引擎内幕 / 产率数字 / 地图名 / 方块参数 / 布局结论）+ 3 条提示 + `boundary-ok` 豁免；**自带 `--selftest`**（6 条样本证明规则真能命中）。当前对 `skill/` 报「违规 0」。已写进 `AGENTS.md` 铁律 8 |
+| #5 离线断言层 | 新增 `drive/offline-checks.py` + `drive/checks/OfflineChecks.java` —— **69 项断言全部 PASS**：JSON 转义 / 响应信封 / 审计判定 / token / `statusFor` 的 11 条映射（含「1401·1500 不在映射表里、靠调用点硬编码」这条设计）+ 源码与文档一致性（端点 34、错误码集合、`shape` 7 种、jar 48/44）。**全程不需要起游戏**。已写进 `AGENTS.md` 铁律 9 |
+
+| 待做 | 说明 |
+|---|---|
+| #10 git 提交 | 最后一步（#12 已完成，见「已完成」表） |
+| #12 观察者 Mod 图形观感 | **已在图形界面实测**（2026-10-06）—— `Loading mod: ai-observer` → 自动连上 `127.0.0.1:6567` → `Received world data`；服务端 `/diag` 的 `fullViewSends=334 / spectatorRouted=334` 证明它在给观察者发全景快照。截图核对：左上角「观战端 / 视角: derelict (全图)」面板 + 三个按钮 + 快捷键帮助 + 小地图，中文完整，并明确标注「只读观战：服务端不会给你任何单位」。**图形回放仍未做**（那是另一件事） |
+| #10 git 提交 | 最后一步 |
+
+### 9.1 公平性相关（影响最大）
+
+| # | 事项 | 现状 | 要判断什么 |
+|---|---|---|---|
+| 1 | **起始位置轮换** | ~~各队核心由 `findCoreSpot + layCoreZone` 自放，位置不同 ⇒ 存在位置优势~~ → **核实后不成立**：主路径是**用官方 PvP 图自带的核心**（位置对称），自建核心只是核心数量不够时的回退（`P1-IMPLEMENTATION.md` §5.2） | **不做**（已移入 §六） |
+| 2 | **凭据边界要不要继续收紧** | 短期已做（fail-closed + 审计留痕 + skill 不再演示取 admin）；中期/长期没做 | 要不要把参赛 token 改成**从环境变量注入、不再落盘**？要不要让 admin 与参赛 token **分文件存放**并加 ACL？ |
+| 3 | **权限要不要分级** | 只有 admin / 非 admin 两档，加 `warp`、`spawn` 两个开关 | 要不要做成「逐操作三态（允许／询问／禁止）」？rimworld-teammate 的形状见 [PRIOR-ART.md](PRIOR-ART.md) §三 |
+
+### 9.2 可信度相关
+
+| # | 事项 | 现状 | 要判断什么 |
+|---|---|---|---|
+| 4 | **锚点 AI + 固定地图集** | ~~没有锚点、地图每局重随 ⇒ 单局成绩不可复现、不可比~~ → **核实后过强**：地图确实每局重随，但**总资源量不变**，换局成绩仍可比；「坐标不能写死」讲的是脚本能否复用布局（[PRODUCTION.md](PRODUCTION.md) §一），是另一件事 | **不做**（已移入 §六） |
+| 5 | **离线断言层** | 所有验证都要起服务器/游戏（§3.5） | 要不要做那一层？先做哪几项最划算（`Json` / `statusFor` / `sizeOffset`） |
+| 6 | **行尾统一** | `.gitattributes` 声明 LF，工作树是混合的（`README.md`、`HttpApi.java` 是 CRLF）；而 `drive/` 有 **101 个**按行匹配的锚点脚本 | 统一成 LF（`git add --renormalize .`，不改已提交内容），还是改 `.gitattributes` 承认 CRLF 现状？**别保持现在这样** |
+
+### 9.3 协作方式相关
+
+| # | 事项 | 现状 | 要判断什么 |
+|---|---|---|---|
+| 7 | **「值得注意时唤醒」** | 方向已定（不是暂停游戏，见 [PRIOR-ART](PRIOR-ART.md) §五），但没有「值得注意」的判定与唤醒通道；只有 SSE 推送 | 现在做还是等？**前提是参赛 AI 是不是 DSH agent** —— 若是，whale-craft 的看门狗形状可以直接用 |
+| 8 | **`docs/` 可检索化** | 24 份 / 约 400 KB，靠人读索引 | 要不要做成 `index` + `read` 的形态让 agent 按需取？（现在全靠自觉全读） |
+| 9 | **边界从「声明」升级为「格式 + 命名」** | [AGENTS.md](../AGENTS.md) 是**声明**（软约束） | 要不要学 rimworld-teammate —— 让不合格式的文件**进不了上下文**，而不是靠"请不要读"？ |
+
+### 9.4 事务性的（一句话就能定）
+
+| # | 事项 | 现状 |
+|---|---|---|
+| 10 | **git 提交范围** | 22 个文件修改 + `AGENTS.md`、`docs/PRIOR-ART.md` 未提交；`docs/images/` 两张封面被删（**无任何文档引用**，唯一关联是 `drive/make-cover.py` 的输出路径）；`drive/` 下 12 个未跟踪脚本 —— 产线/接口类该进库，`make-cover-*`、`scan-fish-*`、`fish-license-scan.json` 像是另一次会话的杂项 |
+| 11 | **`live-match.ps1` 要不要补 BOM** | 它是唯一**仓库里本来就没有 BOM** 的 `.ps1`（其余三个都有）。pwsh 7 读无 BOM 的 UTF-8 没问题，Windows PowerShell 5.1 会把中文读成乱码 |
+| 12 | **观察者 Mod 的图形观感** | ~~编译通过、结构核对过，但从没在图形界面里看过（§2.4）~~ → **已实测**（2026-10-06），见上面「已完成」表 |
+| 13 | **`drive/verify-p1.py` 读错了键名** | 它从 `/content` 的 blocks 读 `requirements`，而那里用的键是 `cost` ⇒ 那一行永远打印 `None`。改脚本还是留作历史？ |
+| 14 | **「单位自主交战」要不要写进 ENGINE-NOTES** | 现在只有「客户端里没有微操逻辑也能打下核心」这个强度的证据（[PRIOR-ART](PRIOR-ART.md) §五 的勘误）；ENGINE-NOTES 的门槛是源码级事实，要补一次确认 |
+
+### 9.5 还没验的（不是判断，是活儿）
+
+| 事项 | 怎么验 |
+|---|---|
+| ~~**审计特权读 + admin fail-closed**~~ | **已验通过**（2026-10-06）：① 无 env → 日志「已跳过」+ `loaded 4 agent(s)`；② 有 env → `loaded 5 agent(s)` 且 `view=all` 返回 `ok`；③ 审计出现 `"privileged":true`。两次都停干净了 |
+| ~~`/intel` 端到端（§3.1）~~ | **已跑通（2026-10-06，首次）** —— 用 `-Darena.allowspawn=true` + 裁判 `spawn?team=` 把 `poly` 直接放到敌核心旁，**绕开产线前置**（验证的是状态机，不是产线）。轨迹：`33 → 156 →[归零]→ 91 → 372 →[归零]→ 565 → confirmed`，确认后拿到敌方核心库存 `{"copper":500,"lead":500}`。顺带补上**三态**（`scouting` 此前没进文档）与一条实测观察：**30 tick 的容差会被突破**，实际耗时是理论 10 秒的数倍。脚本 `drive/verify-intel.py` 已改成可复现形态（原来它只能证明「前置不成立」） |
+| ~~`/place` 的 `appliedRot` / `anchorX/Y`~~ | **已验，并查出一处缺陷且已修**（2026-10-06）：`appliedRot` 原本只是**回显传入值**（传 `9` 回 `9`），而 `/buildings` 回读的实际 `rotation=1` —— 于是「比对 `rot` 与 `appliedRot` 发现越界」这个承诺落空。已归一化，实测六组 `3→3 / 9→1 / -1→3 / 4→0 / 100→0 / 0→0` 与回读逐条一致。`anchor` 部分：2x2 的锚点等于中心（`sizeOffset=0`）✓ |
+| ~~`/block?name=` 的 `requirements`~~ | **已验：字段是好的** —— `/block?name=sorter` 返回 `{"copper":2,"lead":2}`，物品名与数量都对。早先那条「序列化坏了、每项都是 `x`」的笔记**被实测推翻**，[ENGINE-NOTES](ENGINE-NOTES.md) §十五 已改 |

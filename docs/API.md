@@ -115,10 +115,15 @@ print(a.state())                # 已经在局里了，不需要额外的加入�
 | `1009` | 400 | `/place` 被引擎拒绝，非占用所致（地形 / 规则 / 权限） |
 | `1401` | 401 | 鉴权失败 |
 | `1403` | 403 | 权限不足（admin 专属端点、token 与 agent 不符） |
+| `1429` | 429 | 限流超限（每 agent 一个令牌桶，默认 `60/s`、突发 200，见「限流」一节） |
 | `1500` | 500 | 服务端异常 |
 
 **`1008` 与 `1009` 是分开的，别混**：前者挪一格或先 `/break` 就能成，
 后者重试多少次都没用。响应里带 `conflictAt` 指向具体是哪一格挡着。
+
+**同一个 `code` 可以配不同的 HTTP 状态**：`1007` 在主线程超时时是 `504`，
+SSE 并发流超上限（8 条，见「SSE 事件推送」一节）时是 `503`。
+判失败仍然只看 `code`，别拿状态码做唯一判据。
 
 `<agent>` 是配置里分配的 agent 名（如 `alpha`、`referee`）。token 在
 `server-run/config/ai-arena.json`：
@@ -129,6 +134,15 @@ print(a.state())                # 已经在局里了，不需要额外的加入�
 ```
 
 `admin=true` 的 agent 可以带 `view=all` 参数看全图；非 admin 只能看自己队伍视野。
+
+**admin 的凭据不从上面这个文件读。** 它的 token 只来自环境变量 `ARENA_ADMIN_TOKEN`
+（≥16 字符）；配置文件里 admin 条目写的 token 一律被忽略，读不到环境变量时
+**该 admin agent 干脆不注册**（fail-closed），裁判端点全部不可用。
+理由见 [`CONDITIONS.md` 事故记录第 6 条](CONDITIONS.md)：这个配置文件与参赛 AI 同机可读，
+把裁判权限明文放在里面，等于把 `view=all` 递给参赛者。
+
+裁判脚本的取用顺序：`ARENA_ADMIN_TOKEN` → `server-run/admin-token.txt`（由 `start-arena.ps1` 生成）。
+Python 侧用 `arena.load_admin_token()`；参赛客户端用 `arena.load_own_token(agent_id)`。
 
 ### 并发与执行顺序
 
@@ -413,6 +427,35 @@ conveyor (283,109) rot=0   acceptsFrom=[[282,109]]         sendsTo=[[284,109]]
 同理 `beltStall` 的阈值是引擎的 `clogHeat` 逼近 1（约堵了一秒），
 对应的是「肉眼确认它卡住了」，而不是「它比刚才慢了」。
 
+### `GET /watch?since=<事件序号>`
+
+**把「有没有值得注意的事」合成一个判断** —— 用来决定「现在能不能睡」。
+
+```json
+{"tick":18432,"clear":false,"reasons":["stalls","newEvents"],
+ "counts":{"stalls":3,"plans":42,"stuckPlans":1,"worstStuckSeconds":31.2,"newEvents":7},
+ "sinceSeq":1234,"nextSince":1241,
+ "hint":"有事要看：停机 → /stalls；队列 → /queue；新事件 → /events?since=1234"}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `clear` | **没有待处理的事** —— 可以安心睡到下一次事件 |
+| `reasons` | 当前不 `clear` 的原因（`stalls` / `queueStuck` / `newEvents`） |
+| `counts.stalls` | 己方处于异常状态的方块数（**只算自己队**） |
+| `counts.stuckPlans` | 停滞超过 10 秒的建造计划数 |
+| `counts.worstStuckSeconds` | 最久的那个停滞了多久 |
+| `counts.newEvents` | 自 `since` 以来新增的事件数 |
+| `nextSince` | 下次调用时该传的 `since` |
+
+**为什么有这个端点**：实时游戏里 AI 跟不上 tick（引擎 60 tick/s，一次决策是秒级），
+所以正确形态是「**有事才醒**」。但光知道「有事发生」不够 —— 你还得有一个明确的
+「**现在没事**」信号，否则不敢睡，只能一直轮询。
+
+**它只做聚合，不新增信息**：每一项都能用 `/stalls`、`/queue`、`/events` 单独查到，
+这里的价值是**一次请求给出单一判断**。它不告诉你「为什么会堵」或「该改哪一格」——
+那要自己看。
+
 ### `GET /drill`
 
 返回 `data.drills` 数组，每台矿机：
@@ -620,7 +663,7 @@ progress=0.99  rate=0.70  eta=0
 | `POST /break` | `x` `y` | 拆除 |
 | `POST /config` | `x` `y` … | 设置方块配置 |
 | `POST /command` | `action=` `units=` … | 指挥单位（8 种 action，见下） |
-| `POST /control` | `op=` … | 单位操控。`op` 取值：`pos` `order` `enter` `release` `fire` `stopmove` `orders`；**`warp` 默认禁用**（见下） |
+| `POST /control` | `op=` … | 单位操控。`op` 取值（11 个）：`pos` `move` `order` `enter` `release` `fire` `stopmove` `orders` `probe` `ticks` `warp`；**`warp` 默认禁用**（见下）；要移动单位用 `move` 或 `order` |
 | `POST /spawn` | `type` `x` `y` [`team`] | **默认禁用**，见下 |
 | `POST /mine` | `x` `y` [`unit`] | 让单位挖指定格 |
 | `POST /record` | `action=start\|stop` | 录像开关 |
@@ -707,6 +750,34 @@ seconds   = buildCost / (speed × 60)
 **铺错不用先 `/break`**，对同格再 `/place` 一次即可，进度不浪费。
 `/buildings` 里名字以 `build` 开头的（`build1`/`build2`）就是**施工中的格子**，
 对这些格子重新 `/place` 即为转移目标。
+
+### `/place` 返回的 `appliedRot` / `anchorX` / `anchorY` / `size`
+
+每次 `/place` 都带回**实际生效**的朝向与引擎内部的锚点坐标 ——
+不用让每个 AI 自己推坐标系转换：
+
+| 字段 | 含义 |
+|---|---|
+| `appliedRot` | **归一化之后**的实际朝向（`0`=东 `1`=南 `2`=西 `3`=北） |
+| `anchorX` / `anchorY` | 该方块在**引擎内部**的锚点（= 左上角）坐标 |
+| `size` | 方块边长（格） |
+
+**`appliedRot` 用来发现「我把 `rot` 写错了」**：引擎对越界的 `rot` 是**静默环绕**的，
+全都返回成功。比对传入值与返回值即可看出：
+
+```
+rot=9   -> appliedRot=1      ← 写错了，被环绕
+rot=-1  -> appliedRot=3
+rot=4   -> appliedRot=0      ← 常见于把它当成 1-based
+rot=3   -> appliedRot=3      ← 正常，两者一致
+```
+
+（2026-10-06 实测六组，与 `/buildings` 回读的实际 `rotation` 逐条一致。）
+
+**`anchorX` / `anchorY` 用来解释 footprint 落点**：接口一律给**中心**坐标，
+而引擎内部（`Edges.getEdges`、`getLinkedTiles`）按**左上角**定位，换算关系是
+`block.sizeOffset = -((size-1)/2)` —— `2x2 → 0`（中心就是左上那一格）、
+`3x3 → -1`、`5x5 → -2`。与其让每个 AI 自己推这个偏移，不如把换回来的结果直接给出。
 
 ### `/place` 的 `unit` 参数
 
@@ -895,10 +966,9 @@ POST /place?shape=path&path=273,78;278,78;278,82&block=conveyor
 `skill/scripts/arena.py`
 
 ```python
-from arena import Arena, load_tokens
+from arena import Arena, load_own_token
 
-toks, admin = load_tokens()                 # 读 ai-arena.json
-a = Arena("alpha", toks["alpha"])
+a = Arena("alpha", load_own_token("alpha"))  # 只取自己那一个 agent 的 token
 
 a.ping()                                    # True/False
 a.wait_online(timeout=120)                  # 轮询到在线为止
@@ -979,9 +1049,9 @@ DESIGN.md 三处承诺的东西。**与 `/events` 轮询共用同一套游标语
   HTTP 线程，不设限等于给自己开了个拒绝服务的口子
 - 游标过期时**不中断流**，只发一条 `error` 事件并把 `since` 重置为 0 继续
 
-> **验证状态**：实现已编译进 mod，但**尚未在实机上跑过**。
-> 按当前轮次的要求没有启动游戏，所以表格里的行为是按代码写的，
-> 不是实测的。第一次实机验证前请把它当「待验」看。
+> **验证状态**：**已实机验证**（`drive/verify-all.py`，结账见
+> [`TODO.md`](TODO.md) §八）—— `hello` / `ev` / `cursor` / `end` 四种事件
+> 实测全部收到（468 字节），游标语义与 `/events` 一致。
 
 ---
 
@@ -1037,9 +1107,10 @@ base64 编码后放进 `data=`。导出返回里带 `format: "ai-arena-blueprint
 `skipped` **不是静默丢弃**：每条失败都带错误码与具体格，`failureCodes` 还做了
 长度截断（最多 240 字符）免得响应被刷爆。全部失败时返回 `1005`。
 
-> **验证状态**：已编译进 mod，**尚未在实机上跑过**。按当前轮次要求没有启动
-> 游戏，所以导入/导出的实际行为是按代码写的，不是实测的。
-> 特别是「多格方块只记锚点」这条，只做了静态推理，没验过。
+> **验证状态**：**已实机验证**（`drive/verify-blueprint-roundtrip.py`，结账见
+> [`TODO.md`](TODO.md) §八）—— 先在已知空地建 3 条带子 + 1 个 router，导出后
+> 导到另一片空地，`placed 4/4`，并按位置与方块名**逐个核对**通过。
+> 「多格方块只记锚点」这条随之落地。
 
 ---
 

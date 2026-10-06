@@ -9,7 +9,7 @@ description:
   本 skill 只讲**怎么调用接口**，不含任何游戏内容。
 metadata:
   author: Little Code Sauce
-  version: "1.1.0"
+  version: "1.4.0"
 ---
 
 # ai-arena Skill
@@ -79,14 +79,21 @@ pwsh -File C:\dsh\ai-arena\live-match.ps1 -NoClient    # 只要服务端和对�
 
 ## 3. 鉴权
 
-所有接口需要 `Authorization: Bearer <token>`，token 在
-`server-run/config/ai-arena.json` 按 agent 分配。
+所有接口需要 `Authorization: Bearer <token>`，token 按 agent 分配，存在
+`server-run/config/ai-arena.json`。
 
 ```powershell
+# 只取分配给你自己的那个 agent 的 token
+$aa = $env:ARENA_TOKEN                        # 由启动方注入，推荐
+# 或者从配置文件里取自己那一条
 $cfg = Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Encoding UTF8 | ConvertFrom-Json
-$ref = ($cfg.agents | Where-Object { $_.admin }).token      # admin
 $aa  = ($cfg.agents | Where-Object { $_.id -eq 'alpha' }).token
 ```
+
+> **只用自己的 token。** 那个文件里同时存着其他 agent 与 **admin** 的 token ——
+> admin 的 `view=all` 是**组织者特权**（全图视野），拿它看全图等于越过对等约束，
+> 性质与已被默认禁用的瞬移后门（`/control?op=warp`）同级。
+> 需要更大的视野，就靠把己方视野推过去。见仓库 `docs/CONDITIONS.md` 事故记录第 6 条。
 
 **admin 与普通 agent 的差别只在「能看多少」**：admin 可以带 `view=all` 看全图，
 普通 agent 只能看自己队伍视野。**这不代表 admin 能看到游戏内情** ——
@@ -109,32 +116,45 @@ $aa  = ($cfg.agents | Where-Object { $_.id -eq 'alpha' }).token
 | `/units` | — | 己方单位 |
 | `/rates` | `window` | 资源变化速率 |
 | `/stalls` | — | 产线异常警报（堵塞、缺料、满仓） |
+| `/watch` | `since` | 「值得注意」的聚合判定：`clear` 为真表示现在没事，可以睡到下一次事件（配合 `/stream` 或 `/events` 的游标） |
 | `/drill` | — | 己方矿机状态 |
 | `/factory` | — | 己方单位工厂状态 |
 | `/ore` | `x y` | 指定格子的地表信息 |
+| `/block` | `name` | 单个方块的完整定义；不传 `name` 列出全部可放置方块 |
 | `/queue` | — | 建造队列 |
 | `/diag` | — | 服务端诊断 |
 | `/content` | — | 方块 / 物品 / 单位表 |
 | `/database` | — | 汇总数据库 |
-| `/events` | — | 事件流 |
+| `/maps` | — | 所有地图的真实属性 |
+| `/observe` | — | 当前视角状态 |
+| `/events` | `since` [`limit`] | 事件流（游标轮询） |
+| `/stream` | `since` `limit` `seconds` | 事件流（SSE 推送，与 `/events` 同一套游标语义） |
 | `/intel` | — | 情报汇总 |
 
 ### 操作
 
 | 接口 | 参数 | 说明 |
 |---|---|---|
-| `/place` | `x y block [rot]` | 下建造请求 |
+| `/place` | `x y block [rot] [config] [unit]` | 下建造请求（排队，须轮询确认）；批量用 `shape=`：`line` `area` `rect` `outline` `circle` `point` `path` |
 | `/break` | `x y` | 拆除 |
-| `/config` | `x y ...` | 设置方块配置 |
-| `/control` | `op=...` | 单位操控：`pos` `order` `warp` `enter` `release` `fire` |
+| `/config` | `x y value=` | 设置方块配置 |
+| `/command` | `action=...` + `units=` | 指挥单位（8 种 action）：`move` `attackUnit` `assistBuilding` `setCommand` `setStance` `commandBuilding` `requestItem` `transferInventory` |
+| `/control` | `op=...` | 单位操控（11 个 op）：`pos` `move` `order` `enter` `release` `fire` `stopmove` `orders` `probe` `ticks` `warp`（**`warp` 默认禁用**，要移动单位用 `move` 或 `order`） |
 | `/mine` | `x y [unit]` | 让单位挖指定格 |
+| `/spawn` | `type x y` | 生成单位，**默认禁用**（须由工厂生产） |
+| `/blueprint` | GET `x y w h` / POST `x y data=` | 蓝图导出 / 放置 |
 | `/record` | `action=start\|stop` | 录像 |
 | `/chat` | `text` | 发言 |
 | `/admin` | `action=...` | 管理操作（仅 admin） |
 
 ### admin 专属
 
-`/referee/setup?map=` `/referee/host` `/referee/start` `/referee/diag`
+> 下列路径省略了公共前缀，完整形式是 `http://127.0.0.1:7199/v1/referee/<action>`
+> —— **`referee` 是 admin agent 的名字，不是路径里多出来的一层**。
+> 换成别的 admin agent 名同样可用。
+
+`/referee/setup?map=` `/referee/host` `/referee/start`
+`/referee/fog?fog=&static=` `/referee/diag`
 `/referee/buildings?view=all` `/referee/units?view=all`
 `/referee/admin?action=observe&player=<id>`
 
@@ -153,10 +173,9 @@ $aa  = ($cfg.agents | Where-Object { $_.id -eq 'alpha' }).token
 | `survey.py` | `scripts/` | 全图普查（按鉴权级别决定是否加 `view=all`） |
 
 ```python
-from arena import Arena, load_tokens
+from arena import Arena, load_own_token
 
-toks, admin = load_tokens()
-a = Arena("alpha", toks["alpha"])
+a = Arena("alpha", load_own_token("alpha"))            # 只取自己那一个 token
 print(a.rates(window=15))                              # 看产率
 print(a.stalls()[:5])                                  # 看产线异常
 a.place_and_confirm(61, 108, "mechanical-drill")       # 下单 + 轮询确认

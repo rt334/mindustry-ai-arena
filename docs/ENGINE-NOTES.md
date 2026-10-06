@@ -488,9 +488,10 @@ titanium 3  thorium 4  tungsten 5  ← 挖不动
 | `/place` ok，读回没有，`plans` **持续累积** | **材料不足**（`hasAll` 不过） |
 | `plans` 累积且**长时间不降** | 建造单位到不了工地（射程 / 被挡） |
 
-**顺带记一个工具缺陷**：mod 的 `GET /block?name=...` 返回的 `requirements`
-序列化坏了（每项都是 `x`，读不出物品与数量）。**要查配方不能靠这个接口** ——
-得从方块表或实测反推。
+**顺带记一个工具缺陷**：~~mod 的 `GET /block?name=...` 返回的 `requirements`
+序列化坏了（每项都是 `x`，读不出物品与数量）。要查配方不能靠这个接口~~ ——
+**2026-10-06 实测推翻**：`/block?name=sorter` 返回的是 `{"copper":2,"lead":2}`，
+物品名与数量都对。**查配方可以用它了。**（当时那条大概是把别的字段看成了这里。）
 
 **一、改语义宽泛的判定函数前，先列出所有调用点。**
 `isLocal()` / `isRemote()` / `isVisible()` 这类函数在不同位置可能承载**相反**的语义。
@@ -1183,7 +1184,8 @@ if(fogRadius < 0){
 却静默变成朝东 —— 这比「铺错朝向」更隐蔽：连越界的值都不报。
 
 **若你的朝向推理结果不对，先核对 `rot` 有没有越界。**
-`/place` 的返回体带 `appliedRot`（实际生效值），拿它与自己传的 `rot` 比对即可发现。
+`/place` 的返回体带 `appliedRot`（**归一化后的实际生效值**），拿它与自己传的 `rot` 比对即可发现 —— 例如传 `9` 时它会回 `1`。
+（**注**：这条承诺一度落空 —— `appliedRot` 原本原样回显传入值，比对不出差异；2026-10-06 实测发现并已修正，见 [place-failure-stats.md](place-failure-stats.md) 的补注。）
 
 
 ## 三十一、`validPlace` 把**计划**也算进占用
@@ -1209,3 +1211,49 @@ if(fogRadius < 0){
 **`tileOccupied` 因此只在一种情况下出现**：敌方在我方已排计划的格上先建成了
 （敌方校验的是**他们自己的**计划，我方计划对他们不算占用）。
 真实对局里可达，单人试验局面下不可达。
+
+---
+
+## 三十二、单位是**自主交战**的 —— 客户端不必做微操
+
+**结论：单位会自己找目标、自己开火。客户端只要给「往哪推」和「打谁」，
+不需要逐单位的攻击或走位逻辑。**
+
+源码依据（`Mindustry-src`，`core/src/mindustry`）：
+
+| 事实 | 出处 |
+|---|---|
+| 单位类型默认**自动找目标** | `type/UnitType.java:249` `autoFindTarget = true` |
+| 有武器的单位 `canAttack = true` | `UnitType.java:237`、`:1065` `weapons.contains(w -> !w.noAttack)` |
+| `CommandAI` 每帧更新目标 | `ai/types/CommandAI.java:243` `updateTargeting()` |
+| 目标重选：有显式目标时每 10 帧，否则每 20 帧 | `CommandAI.java:557-559` `retarget()` |
+| 已有近距离目标时不再另找 | `CommandAI.java:548` |
+| 进入 `engageRange` 即算交战范围 | `CommandAI.java:276` |
+
+**客户端因此只需要两件事**：推进发 `move`，指定目标发一次 `attack` ——
+之后由单位自己接近、自己开火。
+`ai-client.py` 的「围攻敌方核心」就是一条 `action=attack` 加一个核心坐标
+（`ai-client.py:1373`、`:1377`），全文没有逐单位的攻击或走位代码。
+
+### ⚠ 但在竞技场里**没有「被打自动还手」**
+
+`CommandAI` 的自动反击带一个前置条件：
+
+```java
+// CommandAI.java:531-539
+public void hit(Bullet bullet){
+    if(unit.team.isAI() &&          // ← 只有 AI 队伍才自动反击
+       (!(bullet.owner instanceof Bullet) && bullet.owner instanceof Teamc teamc)
+       && teamc.team() != unit.team && attackTarget == null &&
+       timer.get(timerTarget4, 60f * 10f)){   // 10 秒防抖，防止目标乱跳
+        commandTarget(teamc, true);
+    }
+}
+```
+
+而 PvP 下 `team.isAI()` 为 **false**（P0 实测：「`pvp=true` ⇒ `isAI()=false`」）。
+**所以在本竞技场里，单位被打了不会自动还手** —— 要么主动下 `attack`，
+要么用 `setStance` 配姿态，不能指望它自己反应。
+
+这与 §6.3 是同一类现象：`Team.isAI()` 在 PvP 下为 false，
+凡是「只给 AI 队伍用」的引擎分支，在这里都不生效。

@@ -2,8 +2,8 @@
 
 > Mindustry 多人 PvP 环境下的多 AI 对抗系统。本文档是设计与实现的唯一事实源。
 >
-> **状态**：P0–P7 已实现并实测。服务器侧 33 个端点、压测 62/62 通过；
-> 客户端观察者 Mod 编译通过但图形未实测，图形回放未做。余项见第 10 节。
+> **状态**：P0–P7 已实现并实测。服务器侧 36 个端点、压测 62/62 通过；
+> 客户端观察者 Mod **已在图形界面实测**（2026-10-06）；图形回放未做。余项见第 10 节。
 > **所有技术结论均标注源码位置**，可逐条核对。未验证项集中在第 10 节。
 
 ---
@@ -721,9 +721,16 @@ public static Team get(int id){ return all[((byte)id) & 0xff]; }
 
 ### 6.1 HTTP 端点
 
-**共 33 个端点**（早期版本这里只列了 11 个，实现长出去之后没回写）。
-逐条的参数与响应见 [`API.md`](API.md)，唯一事实源是 `mod/src/aiarena/HttpApi.java` 的
-路由 `switch`。
+**共 36 个 HTTP 端点 = 35 个 `/v1/{agentId}/<action>` + 无鉴权的 `/ping`**
+（另有独立的 WebSocket `/ws`，在 7200 端口，不计入）。
+逐条的参数与响应见 [`API.md`](API.md)；**唯一事实源是 `HttpApi.java` 的路由 `switch`**
+与 `start()` 里的 `createContext`，本清单按源码逐条核对过。
+
+> **勘误**：这里长期写「共 33 个」，构成是 32 个 `/v1/` 端点 + `/ping`。
+> 按源码核对发现两处错：① `stream`（SSE）与 `blueprint` 两个后加的端点**没回写**；
+> ② `/block` 被写成「单格详情 `?x=&y=`」，实际是按 `name=` 查**方块定义**。
+> 漏 2 项、虚增 1 项，恰好又等于 33 —— 所以这个数字看起来一直没错。
+> 阶段报告（P7、压测）里的 33 是**当时的快照**，按历史记录保留，不回改。
 
 ```
 读（GET，Bearer token）
@@ -731,16 +738,18 @@ public static Team get(int id){ return all[((byte)id) & 0xff]; }
   /v1/{agentId}/map?x=&y=&w=&h=&cursor=   地形（区域上限 4096 格，全图用 cursor 续传）
   /v1/{agentId}/units                     己方单位
   /v1/{agentId}/buildings                 己方建筑（含未完工）
-  /v1/{agentId}/block?x=&y=               单格详情
+  /v1/{agentId}/block?name=<方块名>        方块定义（成本 / 输入 / 输出 / 尺寸 / 容量）
   /v1/{agentId}/content                   方块 / 物品 / 单位表
   /v1/{agentId}/ore                       矿脉统计
   /v1/{agentId}/rates?window=<秒>         核心与全队产率
   /v1/{agentId}/stalls                    产线异常警报
+  /v1/{agentId}/watch                     值得注意的事的**聚合判定**（"能睡 / 不能睡"）
   /v1/{agentId}/drill                     矿机明细
   /v1/{agentId}/factory                   单位工厂
   /v1/{agentId}/queue                     建造队列
   /v1/{agentId}/intel                     核心数据确认状态
   /v1/{agentId}/events?since=<seq>        事件流（游标轮询）
+  /v1/{agentId}/stream?since=&seconds=    事件流（SSE 推送，与 /events 同一套游标）
   /v1/{agentId}/database                  汇总数据库
   /v1/{agentId}/maps                      可用地图
 
@@ -750,9 +759,10 @@ public static Team get(int id){ return all[((byte)id) & 0xff]; }
   /v1/{agentId}/config                    设置方块配置
   /v1/{agentId}/command                   指挥（8 种 action）
   /v1/{agentId}/control                   直接操纵
-                                          op = pos order warp enter release fire stopmove orders
+                                          op = pos move order enter release fire stopmove orders probe ticks warp
   /v1/{agentId}/spawn                     生成单位
   /v1/{agentId}/mine                      让单位挖指定格
+  /v1/{agentId}/blueprint                 蓝图导出（GET）/ 放置（POST）
   /v1/{agentId}/chat                      发言
 
 裁判（admin = true）
@@ -790,11 +800,15 @@ public static Team get(int id){ return all[((byte)id) & 0xff]; }
 |---|---|---|
 | 1001 / 1003 | 400 | 参数错 / 越界 |
 | 1002 | 404 | 找不到 |
-| 1004 | 429 | 队列或限流满 |
+| 1004 | 429 | 队列满 / 批量超限（**限流**超限是 `1429`，同为 429） |
 | 1005 / 1403 | 403 | 只读 / 权限不足 |
 | 1006 | 410 | 游标过期 |
-| 1007 | 504 | 主线程超时 |
+| 1007 | 504 | 主线程超时（SSE 并发流超上限时同一码回 `503`） |
+| 1008 | 409 | footprint 被建筑或固体地形占住（挪一格） |
+| 1009 | 400 | 引擎拒绝，非占用所致（重试无意义） |
 | 1401 | 401 | 鉴权失败 |
+| 1429 | 429 | 限流超限（令牌桶，默认 60/s、突发 200） |
+| 1500 | 500 | 服务端异常 |
 
 **判失败要看 body 里的 `code`，不是 HTTP 状态码** —— 状态码只是给代理和日志看的粗分类。
 
@@ -831,7 +845,24 @@ unknown ──[连续可见 10 秒，容错 0.5 秒]──→ confirmed
                                                  再次确认 → 追加新快照（保留历史）
 ```
 
-**两态，无失效，无保持时长。**
+**内部状态是两态**（`Intel.State` 只有一个 `boolean confirmed`），
+**但接口呈现是三态** —— 累积过程中会报 `scouting`（2026-10-06 实测补齐）：
+
+| 接口 `state` | 何时 | 附带字段 |
+|---|---|---|
+| `unknown` | `visibleTicks == 0` | —— |
+| `scouting` | 累积中（`0 < visibleTicks < 600`） | `progress` / `visibleTicks` / `lastSeenTick` |
+| `confirmed` | `visibleTicks >= 600` | `confirmedAt` / `snapshots[]`（库存明细） |
+
+**无失效，无保持时长**（确认后永久保留；再次达标追加新快照）。
+
+> **实测轨迹（2026-10-06，首次端到端跑通）**：把 `poly` 放到敌核心旁，
+> `visibleTicks` 从 33 涨到 156，**中途归零**；再从 91 涨到 372、**又归零**；
+> 第三次累积到 565 后跨过 600 → `confirmed`（`confirmedAt=2239`），
+> 快照拿到 `{"copper":500,"lead":500}`。
+>
+> 也就是说：**归零真的会发生**（中断超过 30 tick 的容差就清零），
+> 所以实际耗时可能是理论 10 秒的数倍。契约本身成立，但**容差在实际对局里可能偏紧**。
 
 #### 参数
 
@@ -987,6 +1018,11 @@ seek:  定位到最近快照 → 重放增量到目标 tick
 ## 8. 调研结论：为什么自写
 
 对 GitHub 上的现有方案做了完整调研，结论是**没有可复用的**。
+
+> **补注**：这一轮调研**没有覆盖 `chen-006/meow-ai-arena`** —— 同期另一个把整条赛事流水线
+> 做完的项目（4 集赛事、万局规模、固定锚点、Bradley–Terry 评分）。后来的一次同侪对照
+> 与「抄什么 / 不抄什么」的判断记在 [`PRIOR-ART.md`](PRIOR-ART.md)。
+> 本节的结论本身不受影响：它不是 Mindustry 方案，是自建游戏引擎的赛事平台。
 
 ### 观战 / 回放
 
@@ -1266,7 +1302,8 @@ GET /v1/{agent}/events?since=<seq>&limit=<n>
 **形状批量**：
 
 ```
-POST /place?shape=line|area|rect|outline|circle|point&x1=&y1=&x2=&y2=&radius=&block=
+POST /place?shape=line|area|rect|outline|circle|point|path&x1=&y1=&x2=&y2=&radius=&block=
+（`path` 走 `path=x,y;x,y;…` 传折线点列，逐格朝向由服务端按走向算）
 POST /break?...                                             参数同上
 POST /spawn?type=<unitType>&x=&y=                           生成单位
 POST /chat?text=...                                         发送消息
@@ -1301,7 +1338,7 @@ spawn mono → {"message":"spawned mono id=235 at tile(61,104) pop=2/24"}
 
 ### P5 · 观战与裁判 —— ✅ 已完成
 
-**结论：服务器侧视角切换与裁判特权完整实测；客户端观察者 Mod 编译通过。详见 [`P5-IMPLEMENTATION.md`](phases/P5-IMPLEMENTATION.md)。**
+**结论：服务器侧视角切换与裁判特权完整实测；客户端观察者 Mod 亦已在图形界面实测（2026-10-06）。详见 [`P5-IMPLEMENTATION.md`](phases/P5-IMPLEMENTATION.md)。**
 
 **服务器侧**：所有只读端点支持 `view` 参数
 

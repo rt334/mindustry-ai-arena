@@ -164,7 +164,7 @@ Jval root = Jval.read(raw);
 | P2 | 对等约束（11 条 + 指挥范围） | `P2-IMPLEMENTATION.md` |
 | P3 | 信息 API（含事件流） | `P3-IMPLEMENTATION.md` |
 | P4 | 操作 API（批量 + spawn + chat） | `P4-IMPLEMENTATION.md` |
-| P5 | 观战与裁判（view + 客户端 Mod） | `P5-IMPLEMENTATION.md` —— 服务器侧实测；**客户端 Mod 只做了编译 + 结构核对，图形未实测** |
+| P5 | 观战与裁判（view + 客户端 Mod） | `P5-IMPLEMENTATION.md` —— 服务器侧实测；客户端 Mod **已在图形界面实测（2026-10-06）** |
 | P6 | 录像（JSONL Recorder） | 见本文件第 7 节 —— 服务器侧就绪；**客户端图形回放未实现** |
 | P7 | 编排与场景（启动脚本） | 本文件 |
 
@@ -218,10 +218,12 @@ C:\dsh\ai-arena\
   server-run\                服务器运行目录
 ```
 
-### 端点总表（33 个）
+### 端点总表（33 个 · 本阶段当时的快照）
 
-> 早期版本这里标题写「18 个」而表里列了 20 条。以 `HttpApi.java` 的路由 `switch` 为准，
-> 实际是 33 个。逐条参数见 [API.md](../API.md)。
+> **本表是 P7 当时的快照，已不是最新值。** 现为 **35 个** —— 后续新增了 `stream`（SSE）
+> 与 `blueprint`，且 `/block` 的实际语义是**按 `name=` 查方块定义**，不是「单格」。
+> **最新清单以 [DESIGN.md](../DESIGN.md) §6.1 为准**（它按 `HttpApi.java` 逐条核对）。
+> 本表按历史记录保留，不回改。
 
 ```
 读（GET，Bearer token）

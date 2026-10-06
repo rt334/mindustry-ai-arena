@@ -13,8 +13,9 @@
 
 ```
 mod/src/aiarena/          服务器 Mod（改这里就要重新编译部署）
+    AIArenaMod.java       Mod 入口：配置、事件监听、观战接管、主线程快照刷新、起 HTTP
     AIArena.java          配置加载、agent 鉴权、限流、日志
-    HttpApi.java          全部 HTTP 端点（4200 行，最大的一块）
+    HttpApi.java          全部 HTTP 端点（4563 行，最大的一块）
     WsServer.java         WebSocket
     Operations.java       建造/拆除/单位指令的**入口**（Actor.place 等）
     Actor.java            底层世界操作：校验、队列、Config
@@ -26,6 +27,10 @@ mod/src/aiarena/          服务器 Mod（改这里就要重新编译部署）
     Intel.java            「确认核心数据」状态机
     VisionTracker.java    视野跟踪
     RateTracker.java      产率采样
+    Audit.java            审计日志：JSONL 追加，只记会改变世界的动作
+    Diag.java             运行时诊断：连接生命周期、断开原因、快照路由计数
+    Shadow.java           影子 Player 池（让 `allowAction` 的权限校验生效）
+    Json.java             JSON 拼装与转义
 
 observer/                 观察者客户端 Mod（图形回放，未完成）
 skill/scripts/arena.py    Python 客户端库（AI 用它接接口）
@@ -57,8 +62,9 @@ $out = "$r\mod\ai-arena.jar"
 Copy-Item $out "$r\server-run\config\mods\ai-arena.jar" -Force
 ```
 
-**`jar` 的条目数固定是 47**（1 个 `mod.hjson` + 46 个 class）。
-数目变了说明有文件增删，值得看一眼是不是意外。
+**`jar` 的条目数固定是 48**（44 个 `.class` + 1 个 `mod.hjson` + `META-INF/MANIFEST.MF` + 2 个目录项
+`META-INF/`、`aiarena/`）。数目变了说明有文件增删，值得看一眼是不是意外。
+（46 个 class / 47 条目都是旧值；上面那份代码结构此前漏列了 5 个源文件，已补。）
 
 **改完必须重启服务器才生效** —— 服务器不热加载。
 
