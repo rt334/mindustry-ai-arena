@@ -1802,6 +1802,32 @@ public final class HttpApi {
                         .toString());
                 }
             }
+            // 泵类：**产出不来自配方**，所以上面那几类判断全都漏掉它 ——
+            // 实测后果（2026-10-06）：`/block?name=water-extractor` 的 outputs 是空数组，
+            // 于是「钻机要水 → 地图上没有水 → 找能产水的方块 → 接口说它什么都不产 →
+            // 放弃水加成」这条推理每一步都对，结论却是错的。
+            //
+            // 取法与引擎 tooltip 同源：`SolidPump.setStats` 用 `60f * pumpAmount`，
+            // 而 `Pump.setStats` 用 `60f * pumpAmount * size²` —— 两者**不一样**，
+            // 照抄才不会有「看着对其实差 size² 倍」的数字。
+            if (b instanceof mindustry.world.blocks.production.SolidPump sp) {
+                if (!outf) outs.append(',');
+                outf = false;
+                outs.append(new Json.Obj().put("kind", "liquid")
+                    .put("liquid", sp.result.name)
+                    .put("perSecond", 60f * sp.pumpAmount)
+                    // 这两个字段回答「它非要建在水源上吗」：产能 = baseEfficiency
+                    // + 脚下该 attribute 的值。attribute 只是加成。
+                    .put("baseEfficiency", sp.baseEfficiency)
+                    .put("attribute", sp.attribute == null ? "" : sp.attribute.name)
+                    .put("note", "连续产出，不消耗配方原料").toString());
+            } else if (b instanceof mindustry.world.blocks.production.Pump pump) {
+                if (!outf) outs.append(',');
+                outf = false;
+                outs.append(new Json.Obj().put("kind", "liquid")
+                    .put("perSecond", 60f * pump.pumpAmount * b.size * b.size)
+                    .put("note", "抽出所在地表格里的液体，需建在液体上").toString());
+            }
             if (b instanceof mindustry.world.blocks.production.Drill dr) {
                 if (!outf) outs.append(',');
                 outf = false;

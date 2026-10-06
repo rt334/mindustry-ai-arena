@@ -835,6 +835,11 @@ progress=0.99  rate=0.70  eta=0
 | `drillSpeed` | 钻机在**满矿**（footprint 全是矿）时的理论速率，单位 **items/s** | 四台钻机的其余顶层字段**完全一样**，唯一区别是 `outputs[].tier` —— 而 **tier 只表示「能挖多硬的矿」，不表示快慢**。想横向比速度只有看这一栏（取法与引擎 tooltip 的 `Stat.drillSpeed` 同源：`60/drillTime × size²`）。实际速率还要乘矿种硬度带来的折扣，具体能挖多少看 `/ore` 与 `/drill` |
 | `powerUse` | 耗电（顶层） | `powerProduction` **只覆盖发电方块**；耗电方块以前顶层什么都不给，会让人把要 0.5 电的硅冶炼厂读成「不用电」 |
 | `inputs[].optional` | `true` = **有它更快、没它也能干** | 引擎自己就把「可选加成」和「必需输入」分开了（`ConsumeLiquidBase.booster`）。四台钻机全都列着 `water` 且**看着像非接不可**，而实测不接水也 `eff=1.0` —— 看 `optional` 就不会误判 |
+| `outputs[]` 的 `kind` | `item` / `liquid` / `power` / `ore` / `unit` | **产出不来自配方的方块也在里面**：泵类（`water-extractor` 等）给 `kind=liquid` + `perSecond` + `baseEfficiency` + `attribute`，钻机给 `kind=ore` + `tier`。这两类别以前是空数组 |
+
+**泵类的 `baseEfficiency` / `attribute` 是回答「它非要建在水源上吗」的两个字段**：产能 = `baseEfficiency + 脚下的 attribute 值`，而 `attribute` 只是**加成**项。只看 `attribute=water` 会得出「没水就不能用」——那是错的。
+
+> 这段话来自一次实测：AI 查到钻机 `inputs` 里有 `water (optional)`，想找水，`/map` 上没有，于是查「哪个方块产水」，而 `water-extractor` 的 `outputs` 当时是 `[]` —— 它的每一步推理都成立，结论却是「这张图的水拿不到」。**接口给了它否定的答案。**
 
 `outputs[].tier` 是**采矿等级**：钻机只能采 `hardness ≤ tier` 的矿（`/ore` 的 `canMine` 就是这个判定的结果）。
 
