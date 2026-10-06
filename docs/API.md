@@ -760,12 +760,24 @@ progress=0.99  rate=0.70  eta=0
 
 | 参数 | 做什么 |
 |---|---|
-| `item=<物品名>` | **反查**：谁产它、谁吃它、哪些矿机能挖它 |
+| `item=<物品名或液体名>` | **反查**：谁产它、谁吃它、哪些矿机能挖它 |
 | `q=<关键词>` | 跨 方块 / 物品 / 单位 / 液体 搜名字与介绍 |
 | `cat=<分类名>` | 列出该分类下的方块（带 `requirements`） |
 | （无参数） | 索引：分类清单 + 物品清单 |
 
-`limit` 默认 60、范围 1–400。物品名不存在时返回 `404 / 1002`。
+`limit` 默认 60、范围 1–400。名字不存在时返回 `404 / 1002`。
+
+**`item=` 接受液体**（2026-10-06 补）。传液体时返回体带 `kind:"liquid"`，
+字段换成液体的那组（`flammability` / `explosiveness` / `heatCapacity` / `viscosity` / `temperature`），
+`producers[]` 的 `how` 会区分 `crafter` / `solid-pump(+ baseEfficiency N，attribute X)` /
+`pump(地表，视建址而定)`；`consumers[]` 的 `how` 形如 `booster 6.0/s` 或 `consumes 6.0/s`
+（`amount` 在引擎里是**每 tick**，这里已乘 60 换成每秒，与 tooltip 同源）。
+
+> 为什么这条重要：**固体矿能靠 `/ore` 找到，液体不能** —— `/ore` 只列矿脉。
+> 于是「这个资源在图上找不到产地」和「这个资源根本不存在」在接口上长得一模一样，
+> 而复盘发现 AI 正是卡在这里：它查到钻机 `inputs` 里有可选的 `water`，想加水加成，
+> `/map` 上找不到水源，于是去问「谁能产水」—— 而 `/database?item=water` 当时返回 404。
+> **它的推理没错，是接口答了「不存在」。**
 
 #### `?item=` 是它最有用的一支
 

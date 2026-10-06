@@ -1283,10 +1283,71 @@ public final class HttpApi {
 
         ensureBundle();
 
-        // ---- 反查：这个物品谁产、谁吃 ----
+        // ---- 反查：这个物品/液体谁产、谁吃 ----
         if (itemName != null) {
             mindustry.type.Item it = Vars.content.item(itemName);
-            if (it == null) { respond(ex, 404, Json.error(1002, "unknown item: " + itemName)); return; }
+            // 液体走同一个入口。以前这里只认 Item，`/database?item=water` 直接 404 ——
+            // 而「某个资源在图上找不到时该问谁产它」正是这个端点存在的理由
+            // （见上面那段注释）。液体是它唯一漏掉的一整类资源，而且是**最容易被
+            // 误判成「地图上没有就没戏」**的那一类：固体矿能靠 /ore 找到，
+            // 液体不在 /ore 里，于是「找不到生产方」和「不存在」看起来一模一样。
+            mindustry.type.Liquid lq = it == null ? Vars.content.liquid(itemName) : null;
+            if (it == null && lq == null) {
+                respond(ex, 404, Json.error(1002, "unknown item or liquid: " + itemName));
+                return;
+            }
+
+            if (lq != null) {
+                StringBuilder lp = new StringBuilder("[");
+                StringBuilder lc = new StringBuilder("[");
+                boolean lpf = true, lcf = true;
+                int lpn = 0, lcn = 0;
+                for (Block b : Vars.content.blocks()) {
+                    if (b.isHidden()) continue;
+                    if (blockProducesLiquid(b, lq)) {
+                        if (!lpf) lp.append(',');
+                        lpf = false; lpn++;
+                        lp.append(new Json.Obj()
+                            .put("name", b.name)
+                            .put("localizedName", blockNameOf(b))
+                            .put("category", b.category == null ? "" : b.category.name())
+                            .put("size", b.size)
+                            .put("how", liquidProduceKind(b))
+                            .toString());
+                    }
+                    if (blockConsumesLiquid(b, lq)) {
+                        if (!lcf) lc.append(',');
+                        lcf = false; lcn++;
+                        lc.append(new Json.Obj()
+                            .put("name", b.name)
+                            .put("localizedName", blockNameOf(b))
+                            .put("category", b.category == null ? "" : b.category.name())
+                            .put("size", b.size)
+                            .put("how", liquidConsumeKind(b, lq))
+                            .toString());
+                    }
+                }
+                lp.append(']');
+                lc.append(']');
+
+                respond(ex, 200, Json.ok(new Json.Obj()
+                    .put("agent", agent.id)
+                    .put("kind", "liquid")
+                    .put("liquid", lq.name)
+                    .put("localizedName", liquidNameOf(lq))
+                    .put("description", liquidDescOf(lq))
+                    .put("flammability", lq.flammability)
+                    .put("explosiveness", lq.explosiveness)
+                    .put("heatCapacity", lq.heatCapacity)
+                    .put("viscosity", lq.viscosity)
+                    .put("temperature", lq.temperature)
+                    .put("producerCount", lpn)
+                    .putRaw("producers", lp.toString())
+                    .put("consumerCount", lcn)
+                    .putRaw("consumers", lc.toString())
+                    .toString()));
+                return;
+            }
 
             StringBuilder producers = new StringBuilder("[");
             StringBuilder consumers = new StringBuilder("[");
@@ -1465,7 +1526,7 @@ public final class HttpApi {
 
         respond(ex, 200, Json.ok(new Json.Obj()
             .put("agent", agent.id)
-            .put("usage", "q=<关键词> 搜索 | item=<物品> 反查谁产谁吃 | cat=<分类> 列方块 | 方块详情用 /block?name=<方块>")
+            .put("usage", "q=<关键词> 搜索 | item=<物品或液体> 反查谁产谁吃 | cat=<分类> 列方块 | 方块详情用 /block?name=<方块>")
             .put("categories", cats.size())
             .putRaw("categoryCounts", catArr.toString())
             .putRaw("items", items.toString())
@@ -1480,9 +1541,81 @@ public final class HttpApi {
         return false;
     }
 
-    /** 这个方块是否产出该物品。 */
-    private static boolean blockProducesItem(Block b, mindustry.type.Item it) {
+    /**
+     * 这个方块是否产出该液体。
+     *
+     * 液体没有 `/ore` 那样的「资源在哪」查询，所以这条反查是**唯一**能回答
+     * 「水/油从哪来」的地方 —— 它断掉时，AI 得到的是「不存在」而不是「查不到」。
+     */
+    private static boolean blockProducesLiquid(Block b, mindustry.type.Liquid lq) {
         if (b instanceof mindustry.world.blocks.production.GenericCrafter gc) {
+            if (gc.outputLiquid != null && gc.outputLiquid.liquid == lq) return true;
+            if (gc.outputLiquids != null) {
+                for (var st : gc.outputLiquids) if (st.liquid == lq) return true;
+            }
+        }
+        // SolidPump 必须先判：它是 Pump 的子类
+        if (b instanceof mindustry.world.blocks.production.SolidPump sp) {
+            return sp.result == lq;
+        }
+        // 基类 Pump（地表泵）抽的是它脚下那格的液体，静态查不出是哪种 ——
+        // 对任何液体都算「视建址而定」的可能来源。
+        return b instanceof mindustry.world.blocks.production.Pump;
+    }
+
+    /** 液体产出方式说明。 */
+    private static String liquidProduceKind(Block b) {
+        if (b instanceof mindustry.world.blocks.production.SolidPump sp) {
+            return "solid-pump(+ baseEfficiency " + sp.baseEfficiency
+                + "，attribute " + (sp.attribute == null ? "none" : sp.attribute.name) + ")";
+        }
+        if (b instanceof mindustry.world.blocks.production.Pump) {
+            return "pump(地表，视建址而定)";
+        }
+        return "crafter";
+    }
+
+    /** 这个方块是否消耗该液体。 */
+    private static boolean blockConsumesLiquid(Block b, mindustry.type.Liquid lq) {
+        if (b.consumers == null) return false;
+        for (var c : b.consumers) {
+            if (c instanceof mindustry.world.consumers.ConsumeLiquid cl) {
+                if (cl.liquid == lq) return true;
+            }
+            if (c instanceof mindustry.world.consumers.ConsumeLiquids cls) {
+                for (var st : cls.liquids) if (st.liquid == lq) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 液体消耗方式说明。
+     *
+     * `amount` 的单位是**每 tick**（`ConsumeLiquidBase` 的字段注释是
+     * "amount used per frame"），这里乘 60 换成每秒 —— 与引擎 tooltip 的
+     * `amount * 60f` 同源。
+     * `booster` 为真时是**可选加成**（有它更快、没它也能干），不是硬性门槛。
+     */
+    private static String liquidConsumeKind(Block b, mindustry.type.Liquid lq) {
+        if (b.consumers == null) return "unknown";
+        for (var c : b.consumers) {
+            if (c instanceof mindustry.world.consumers.ConsumeLiquid cl && cl.liquid == lq) {
+                return (cl.booster ? "booster " : "consumes ") + (cl.amount * 60f) + "/s";
+            }
+            if (c instanceof mindustry.world.consumers.ConsumeLiquids cls) {
+                for (var st : cls.liquids) {
+                    if (st.liquid == lq) {
+                        return (cls.booster ? "booster " : "consumes ") + (st.amount * 60f) + "/s";
+                    }
+                }
+            }
+        }
+        return "unknown";
+    }
+
+    /** 这个方块是否产出该物品。 */
+    private static boolean blockProducesItem(Block b, mindustry.type.Item it) {        if (b instanceof mindustry.world.blocks.production.GenericCrafter gc) {
             if (gc.outputItem != null && gc.outputItem.item == it) return true;
             if (gc.outputItems != null) {
                 for (var st : gc.outputItems) if (st.item == it) return true;
@@ -1493,7 +1626,7 @@ public final class HttpApi {
             if (it.hardness <= dr.tier) return true;
         }
         if (b instanceof mindustry.world.blocks.production.SolidPump sp) {
-            // 抽水机那类：产的是液体，不算物品
+            // 抽水机那类：产的是液体，不算物品 —— 液体反查走 blockProducesLiquid
         }
         return false;
     }
