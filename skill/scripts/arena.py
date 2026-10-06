@@ -273,17 +273,20 @@ class Arena:
         return out
 
     def trace(self, x, y, limit=300):
-        """从这一格沿 `sendsTo` 追，看能不能走到核心。
+        """从这一格沿 `sendsTo` 追到核心 —— **只验「路径通不通」，不验「有没有货在流」**。
 
-        返回 `(ok, path, reason)`：走到核心则 ok=True；否则 reason 说明断在哪
-        （「该格没有建筑」/「末端无出口」/「循环」/「超步数」）。
+        ⚠ **路径通 ≠ 这条线有用。** 上游没有钻机、或源头满仓停摆时，你会得到一条
+        **空管子**：每一格的 `sendsTo` 都指向下一格、最终到核心，而产率一点没涨。
 
-        **为什么需要它**：方向全对、尽头却是空地的线，是一条**完美对齐的死路** ——
-        货在末端堆积、上游满仓停摆，而每一格的 `sendsTo` 看起来都对。**它不报错**，
-        你只能自己追。
+        **判断产线是否有效，看 `/rates`（有没有涨）和 `/stalls`（堵在哪），不要看这个方法。**
+        它回答的是「结构上接不接得上」，用来排**布线错误**（方向填反、尽头是空地、
+        中间断了）—— 那是**必要条件，不是成功判据**。
 
-        ⚠ 对**钻机**的 `sendsTo` 是「周围哪几格有建筑」的**候选清单**，不是流量证据。
-        追链时从**传送带**那格起追更可靠。
+        > 实测教训：有 agent 用它验证完「到核心」就认为这条线做完了，
+        > 结果一局结束时核心产率几乎没有涨 —— 因为源头只有寥寥几台钻机，
+        > 那几条"通了"的线全是空管子。
+
+        返回 `(ok, path, reason)`；ok=True 只表示走到核心了。
         """
         bl = self.buildings()
         pos = {(b["x"], b["y"]): b for b in bl}
@@ -291,7 +294,7 @@ class Arena:
         cur, seen = (x, y), []
         while True:
             if cur in cores:
-                return True, seen, "到核心"
+                return True, seen, "到核心（仅表示路径连通）"
             if len(seen) > limit:
                 return False, seen, "超步数"
             node = pos.get(cur)
@@ -306,15 +309,58 @@ class Arena:
             seen.append(cur)
             cur = nxt
 
+    def line_flow(self, points):
+        """这条线上的**货在不在动** —— 比 `trace` 更接近「有效」的判据。
+
+        逐个格子看它身上堆着多少东西、以及它自己有没有被 `/stalls` 报出来：
+
+        返回 `{"empty": n, "loaded": [(x,y,items)...], "stalled": [(x,y,原因)...]}`
+
+        - `empty` 多 ⇒ **上游没货**（线是空管子，先去看源头）
+        - `loaded` 且 `stalled` ⇒ **堵住了**（下游消化不动，或方向反了）
+        - `loaded` 且不 stalled ⇒ **正常在流**
+        """
+        bl = self.buildings()
+        pos = {(b["x"], b["y"]): b for b in bl}
+        stalled_map = {}
+        try:
+            for s in self.stalls():
+                stalled_map[(s.get("x"), s.get("y"))] = s.get("kind", "?")
+        except Exception:
+            pass
+        empty, loaded, stalled = 0, [], []
+        for (px, py) in points:
+            b = pos.get((px, py))
+            if b is None:
+                continue
+            items = b.get("items") or {}
+            if sum(items.values()) == 0:
+                empty += 1
+                if (px, py) in stalled_map:
+                    stalled.append(((px, py), stalled_map[(px, py)]))
+            else:
+                loaded.append((px, py, items))
+                if (px, py) in stalled_map:
+                    stalled.append(((px, py), stalled_map[(px, py)]))
+        return {"empty": empty, "loaded": loaded, "stalled": stalled}
+
     def lay(self, points, block, rot=None, timeout=90.0):
-        """铺一条线**并自检** —— 一次调用做完「一整件事」。
+        """铺一条线并自检 —— 但**自检的是「布线接没接错」，不是「这条线有没有产出」**。
 
-        三步：铺（`shape=path`，服务端逐格算朝向）→ 等建成 → **逐格追链到核心**。
+        ⚠ **`bad` 为空只说明路径连通。** 源头没有钻机时你得到的是一条空管子，
+        `bad` 照样是空的、产率照样不涨。
 
-        返回 `{"laid": n, "rotations": [...], "bad": [((x,y), 原因), ...]}`。
-        `bad` 为空就是这条线整条通到核心；否则每项告诉你哪一格断在什么原因上。
+        三步：铺（`shape=path`，服务端逐格算朝向）→ 等建成 → 逐格追链 **+ 看沿线货流**。
 
-        **这就是「一个回合应该干的事」的样子**：不是下一次单，是做完一件事并验证它。
+        返回 `{"laid", "bad", "flow", "rotations"}`：
+
+        - `bad`  —— 布线错误：`[((x,y), "断在哪"), ...]`，空 = 没接错
+        - `flow` —— **线在不在动**：`{"empty": n, "loaded": [...], "stalled": [...]}`
+          - `empty` 高 ⇒ 上游没货，**先去看源头有没有钻机在产**
+          - `stalled` 非空 ⇒ 堵住了，**先去看下游消化不动还是方向反了**
+
+        **只有 `bad` 空 + `flow.empty` 低 + `flow.stalled` 空，这条线才算真的在工作。**
+        最终判据仍然是产率：`/rates` 有没有涨。
         """
         r = self.place_path(points, block, rot=rot)
         self.poll_until(
@@ -326,6 +372,7 @@ class Arena:
             if not good:
                 bad.append(((px, py), why))
         return {"laid": len(points), "bad": bad,
+                "flow": self.line_flow(points),
                 "rotations": (r or {}).get("rotations") if isinstance(r, dict) else None}
 
 
