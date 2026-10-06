@@ -882,7 +882,7 @@ seconds   = buildCost / (speed × 60)
 
 | 字段 | 含义 |
 |---|---|
-| `appliedRot` | **归一化之后**的实际朝向（`0`=东 `1`=南 `2`=西 `3`=北） |
+| `appliedRot` | **归一化之后**的实际朝向（`0`=东 `1`=南 `2`=西 `3`=北）。**不可旋转的方块恒为 `0`** —— 见下 |
 | `anchorX` / `anchorY` | 该方块在**引擎内部**的锚点（= 左上角）坐标 |
 | `size` | 方块边长（格） |
 
@@ -897,6 +897,11 @@ rot=3   -> appliedRot=3      ← 正常，两者一致
 ```
 
 （2026-10-06 实测六组，与 `/buildings` 回读的实际 `rotation` 逐条一致。）
+
+**注意：不可旋转的方块，`appliedRot` 恒为 `0`。** 引擎的 `Block.rotate` 默认 `false`，
+`conveyor` / 炮塔 / 钻机这类是 `true`，而 `sorter` 这类是 `false` —— 后者在引擎里
+**根本没有朝向**（`/buildings` 回读永远是 0）。所以对它传 `rot=2` 也不会得到 2，
+这是如实反映，不是越界环绕。判据见 `ENGINE-NOTES` §三十三。
 
 **`anchorX` / `anchorY` 用来解释 footprint 落点**：接口一律给**中心**坐标，
 而引擎内部（`Edges.getEdges`、`getLinkedTiles`）按**左上角**定位，换算关系是

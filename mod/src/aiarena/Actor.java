@@ -216,7 +216,12 @@ public final class Actor {
 
         // 与其让每个 AI 自己推这个偏移，不如把它换回来的结果直接给出。
 
-        extra.put("appliedRot", ((rotation % 4) + 4) % 4);   // 归一化：引擎会环绕越界值（9→1、-1→3、4→0），原样回显会让「比对 rot 与 appliedRot」永远看不出差异
+        // 归一化：引擎会环绕越界值（9→1、-1→3、4→0）。
+        //
+        // 另外：`rotate=false` 的方块（如 sorter）**在引擎里根本没有朝向** ——
+        // 实测 `place?sorter&rot=2` 之后回读的 `rotation` 是 0，同批的 conveyor 回读 2。
+        // 所以对它们一律给 0，否则这个字段会承诺一个引擎里不存在的朝向。
+        extra.put("appliedRot", block.rotate ? (((rotation % 4) + 4) % 4) : 0);
 
         extra.put("anchorX", x + (int) block.sizeOffset);
 

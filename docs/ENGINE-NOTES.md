@@ -1257,3 +1257,24 @@ public void hit(Bullet bullet){
 
 这与 §6.3 是同一类现象：`Team.isAI()` 在 PvP 下为 false，
 凡是「只给 AI 队伍用」的引擎分支，在这里都不生效。
+
+---
+
+## 三十三、`Block.rotate = false` 的方块**没有朝向**
+
+实测：`place?block=sorter&rot=2` 之后，`/buildings` 回读的 `rotation` 是 **0**；
+而同一批下的 `conveyor`（同样 `rot=2`）回读是 **2**。
+
+根因在源码：`Block.java:122` `public boolean rotate;` —— **默认 false**，
+而 `Sorter` 的构造函数里没把它设成 `true`。`rotate = false` 的方块在引擎里
+不写入 rotation，所以它**永远是 0**。
+
+**这修正了一条复盘记录**：「`/buildings` 回读 `rotation` 恒为 0」不是普遍缺陷，
+它只发生在**不可旋转的方块**上。判据就是 `Block.rotate` ——
+`conveyor` / 炮塔 / 钻机这类是 true，`sorter` 这类是 false。
+（复盘里另一局「正常回读」的样本是钻机，那类本来就可旋转。）
+
+**接口侧的处置**：`Actor.place` 对 `rotate=false` 的方块，`appliedRot` 一律给 **0**。
+修之前它对这类方块会回显传入值（传 2 回 2），**等于承诺一个引擎里不存在的朝向** ——
+而 `/buildings` 回读是 0，两者对不上。实测六组：sorter `2→0`、`0→0`；
+conveyor `2→2`、`0→0`、`9→1`、`-1→3`。

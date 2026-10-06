@@ -90,6 +90,9 @@
   已在 `Actor.place` 里归一化（`((rot % 4) + 4) % 4`），实测六组
   `3→3`、`9→1`、`-1→3`、`4→0`、`100→0`、`0→0`，与 `/buildings` 回读**逐条一致**。
   **若客户端曾依赖「`appliedRot == 传入的 rot`」，现在会看到差异 —— 那正是它该反映的东西。**
+- **补充（同日）**：对 `Block.rotate = false` 的方块（如 `sorter`、`router` 这类），
+  `appliedRot` 一律给 **`0`** —— 这类方块在引擎里**根本没有朝向**（`/buildings` 回读永远是 0），
+  回显传入值等于承诺一个不存在的朝向。判据与实测见 `ENGINE-NOTES.md` §三十三。
 - **`/block?name=` 的 `requirements` 是好的。** 早先笔记记的「序列化坏了、每项都是 `x`」不成立：
   实测 `/block?name=sorter` 返回 `{"copper":2,"lead":2}`，物品名与数量都对。**查配方可以用它了。**
 - **`API.md` 补上 `/place` 的 `appliedRot` / `anchorX` / `anchorY` / `size`** ——
