@@ -29,11 +29,19 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class Audit {
     private static final java.util.Set<String> MUTATING = java.util.Set.of(
         "place", "break", "config", "mine", "control", "command",
-        "queue", "admin", "chat", "spawn", "record", "setup",
+        "admin", "chat", "spawn", "record", "setup",
         // 下面这三个同样改游戏状态，此前漏记：
         "host",   // 打开游戏端口 6567
         "start",  // 解除暂停
-        "fog"     // 改迷雾规则
+        "fog",    // 改迷雾规则
+        // `batch` 一次改多处状态 —— 加这个端点时漏了它，
+        // 于是审计里只看得到 `queue`、看不到它实际铺了什么（实测踩到）。
+        "batch"
+        // 注意 `queue` **故意不在这里**：不带 `clear` 的 `/queue` 是纯读，
+        // 而把它算进 MUTATING 会让审计被「问队列」刷屏 ——
+        // 实测有一局 90 条记录**全是** queue，真正的写操作一条看不见。
+        // `queue?clear=true` 确实改状态，但它的效果随后会在 /buildings 与
+        // /queue 里体现，不必单列。
     );
 
     private static Fi file;
