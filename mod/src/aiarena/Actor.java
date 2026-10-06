@@ -105,7 +105,23 @@ public final class Actor {
 
         // 用引擎自己的判定，不复刻它的规则（含地形、权限、coreZone 等全部条件）。
         // checkVisible 传 false —— 可见性上面已经单独查过了。
-        if (!mindustry.world.Build.validPlace(block, team, x, y, rotation, false)) {
+        // 需要朝向的方块必须显式给 rot。
+        //
+        // 为什么是个错误而不是「默认成东」：0 是东，而带子这类方块**必须有正确朝向
+        // 才能工作**，默认给某个方向几乎注定是错的 —— 而且它是**静默**的，
+        // 不报错、不警告，只是把整条线铺反。
+        // 实测有一局 220 格带子全朝东、没有一格指向核心，产率恒为 0，接口一言不发。
+        // 真人玩家不会踩这个：游戏里带子朝向是跟着鼠标拖动定的，没有「默认方向」。
+        if (rotation < 0 && block.rotate) {
+            return Result.err(1001, "block '" + blockName + "' has orientation: "
+                + "rot is required (0=东 1=南 2=西 3=北). "
+                + "Not passing it used to silently default to 0=east, which lays a whole "
+                + "line backwards without any error.");
+        }
+        // rotate=false 的方块（sorter 之类）在引擎里没有朝向，给了也无妨，忽略即可
+        int rot = block.rotate ? (((rotation % 4) + 4) % 4) : 0;
+
+        if (!mindustry.world.Build.validPlace(block, team, x, y, rot, false)) {
             int size = block.size;
             int hx = -1, hy = -1;
             for (int dx = 0; dx < size && hx < 0; dx++) {
@@ -149,8 +165,8 @@ public final class Actor {
         }
 
         BuildPlan plan = (resolvedConfig == null)
-            ? new BuildPlan(x, y, rotation, block)
-            : new BuildPlan(x, y, rotation, block, resolvedConfig);
+            ? new BuildPlan(x, y, rot, block)
+            : new BuildPlan(x, y, rot, block, resolvedConfig);
 
         // 「转移建造目标」：对同一格重复下单会替换掉原有计划 ——
         // BuilderComp.addBuild 会按 (x,y) 找到旧计划并移除，且若该格已在施工
@@ -221,7 +237,7 @@ public final class Actor {
         // 另外：`rotate=false` 的方块（如 sorter）**在引擎里根本没有朝向** ——
         // 实测 `place?sorter&rot=2` 之后回读的 `rotation` 是 0，同批的 conveyor 回读 2。
         // 所以对它们一律给 0，否则这个字段会承诺一个引擎里不存在的朝向。
-        extra.put("appliedRot", block.rotate ? (((rotation % 4) + 4) % 4) : 0);
+        extra.put("appliedRot", rot);
 
         extra.put("anchorX", x + (int) block.sizeOffset);
 

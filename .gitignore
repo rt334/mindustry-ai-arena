@@ -14,3 +14,4 @@ observer/classes/
 
 # 子智能体/参赛客户端的工作目录（scratch 脚本与地图缓存，不属于仓库）
 work/
+_work_*

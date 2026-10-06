@@ -541,7 +541,14 @@ public final class HttpApi {
         String block = p.get("block", null);
         if (block == null) { respond(ex, 400, Json.error(1001, "required: block")); return; }
 
-        int rot = p.getInt("rot", 0);
+        // 默认 **-1 = 未指定**，而不是 0。
+        //
+        // 因为 0 是「东」，对一个必须有朝向才能工作的方块（传送带）来说，
+        // 「默认给东」几乎注定是错的，而且**静默**：不报错、不警告，
+        // 只是把整条线铺反。实测有一局 220 格带子 100% 朝东、没有一格指向核心，
+        // 产率恒为 0，而接口什么都没说。
+        // 现在未指定会让 Actor.place 明确拒绝，并告诉调用方该怎么填。
+        int rot = p.getInt("rot", -1);
         String config = p.get("config", null);
 
         Team team = agent.team();
@@ -698,7 +705,9 @@ public final class HttpApi {
                             x = Integer.parseInt(f[1].trim());
                             y = Integer.parseInt(f[2].trim());
                             String blk = f[3].trim();
-                            int rot = f.length >= 5 ? Integer.parseInt(f[4].trim()) : 0;
+                            // 同样用 -1 表示「未指定」，交给 Actor.place 判错 ——
+                            // 不在这里默认成 0，理由见 handlePlace 里的注释。
+                            int rot = f.length >= 5 ? Integer.parseInt(f[4].trim()) : -1;
                             r = Actor.place(team, x, y, blk, rot, null, -1);
                         }
                         case "b" -> {
