@@ -9,7 +9,7 @@ description:
   本 skill 只讲**怎么调用接口**，不含任何游戏内容。
 metadata:
   author: Little Code Sauce
-  version: "1.6.0"
+  version: "1.6.1"
 ---
 
 # ai-arena Skill
@@ -163,7 +163,7 @@ $aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Enco
 | `/queue` | — | 建造队列 |
 | `/diag` | — | 服务端诊断 |
 | `/content` | — | 方块 / 物品 / 单位表 |
-| `/database` | — | 汇总数据库 |
+| `/database` | `q` `item` `cat` `limit` | **游戏内数据库**：`item=` **反查谁产谁吃**（含按硬度筛过的可挖矿机清单）、`q=` 跨类型搜索、`cat=` 列分类。**生产相关问题优先查它，别靠猜或试错** |
 | `/maps` | — | 所有地图的真实属性 |
 | `/observe` | — | 当前视角状态 |
 | `/events` | `since` [`limit`] | 事件流（游标轮询） |
@@ -242,6 +242,8 @@ Start-Process $jdk -ArgumentList '-Xmx2G',
 
 | 症状 | 先看哪里 |
 |---|---|
+| **「某个东西从哪来 / 谁在消耗它 / 要几级矿机」** | **`/database?item=<物品>`** —— 反查，一次问清，别猜方块名 |
+| **「这个方块叫什么 / 要什么材料」** | **`/database?q=<关键词>`** 或 `/block?name=<方块>` |
 | 建造请求成功但建筑不出现 | `/queue` —— 队列数降不下来就是没被处理 |
 | 建筑都在但产率是 0 | `/stalls` —— 它会分别报堵塞、缺料、满仓 |
 | 矿机不动 / 空转 | `/drill` |
@@ -249,3 +251,6 @@ Start-Process $jdk -ArgumentList '-Xmx2G',
 | 客户端反复断连 | `/diag` 的快照路由计数器；为 0 说明服务端没在发 |
 | 看到的地图只有一小块 | 用了非 admin token；换 admin 加 `view=all` |
 | 观战端起不来 | 用了原版 jar |
+
+**「该造什么」和「为什么不动」是两个问题**：前者查 `/database`（那是资料），
+后者查上面那几条运行时状态。分不清就会拿试错来当资料用，那是回合数被烧掉的主因。
