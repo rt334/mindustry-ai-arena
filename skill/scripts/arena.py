@@ -225,6 +225,109 @@ class Arena:
         self.place(x, y, block, rot)
         return self.poll_until(lambda: self.building_at(x, y), timeout=timeout)
 
+    # ------------------------------------------------- 批量化：一次做完一整件事
+
+    def batch(self, ops):
+        """一次请求做一批操作 —— **这是省模型往返的关键手段**。
+
+        ops 是元组列表：
+
+            ("p", x, y, block, rot)   放置（rot 可省，默认 0）
+            ("b", x, y)               拆除
+            ("c", x, y, config)       配置
+
+        返回 `(applied, failed)`，`failed` 每项带原始下标与错误码。
+
+        **为什么必须用它**：你的一次「思考」是一个模型往返（秒级到几十秒），
+        而一局只有 15~30 分钟 —— 逐个下命令会把回合**全花在往返上**。
+        实测对照：一次 batch 放 20 条带子 **24 ms**，逐个发 20 次 place **327 ms**。
+        差的不只是 14 倍时间，是 **1 个回合和 20 个回合**。
+
+        逐条独立：一条失败不影响其余，`failed` 里能看出是哪条。
+        **所以别怕一批里混进可能失败的动作。**
+        """
+        parts = []
+        for op in ops:
+            k = op[0]
+            if k == "p":
+                x, y, blk = op[1], op[2], op[3]
+                rot = op[4] if len(op) > 4 else 0
+                parts.append(f"p,{int(x)},{int(y)},{blk},{int(rot)}")
+            elif k == "b":
+                parts.append(f"b,{int(op[1])},{int(op[2])}")
+            elif k == "c":
+                parts.append(f"c,{int(op[1])},{int(op[2])},{op[3]}")
+            else:
+                raise ValueError(f"unknown op kind: {k!r}（用 p / b / c）")
+        d = self.post("batch", ops=";".join(parts))
+        return d.get("applied", 0), d.get("failed", [])
+
+    def cores(self):
+        """本方核心占据的格子集合（多格方块按中心 ± 2 展开）。"""
+        out = set()
+        for b in self.buildings():
+            if b["block"].startswith("core-"):
+                for dx in range(-2, 3):
+                    for dy in range(-2, 3):
+                        out.add((b["x"] + dx, b["y"] + dy))
+        return out
+
+    def trace(self, x, y, limit=300):
+        """从这一格沿 `sendsTo` 追，看能不能走到核心。
+
+        返回 `(ok, path, reason)`：走到核心则 ok=True；否则 reason 说明断在哪
+        （「该格没有建筑」/「末端无出口」/「循环」/「超步数」）。
+
+        **为什么需要它**：方向全对、尽头却是空地的线，是一条**完美对齐的死路** ——
+        货在末端堆积、上游满仓停摆，而每一格的 `sendsTo` 看起来都对。**它不报错**，
+        你只能自己追。
+
+        ⚠ 对**钻机**的 `sendsTo` 是「周围哪几格有建筑」的**候选清单**，不是流量证据。
+        追链时从**传送带**那格起追更可靠。
+        """
+        bl = self.buildings()
+        pos = {(b["x"], b["y"]): b for b in bl}
+        cores = self.cores()
+        cur, seen = (x, y), []
+        while True:
+            if cur in cores:
+                return True, seen, "到核心"
+            if len(seen) > limit:
+                return False, seen, "超步数"
+            node = pos.get(cur)
+            if node is None:
+                return False, seen, "该格没有建筑"
+            outs = node.get("sendsTo") or []
+            if not outs:
+                return False, seen, "末端无出口"
+            nxt = tuple(outs[0])
+            if nxt in seen or nxt == cur:
+                return False, seen, "循环"
+            seen.append(cur)
+            cur = nxt
+
+    def lay(self, points, block, rot=None, timeout=90.0):
+        """铺一条线**并自检** —— 一次调用做完「一整件事」。
+
+        三步：铺（`shape=path`，服务端逐格算朝向）→ 等建成 → **逐格追链到核心**。
+
+        返回 `{"laid": n, "rotations": [...], "bad": [((x,y), 原因), ...]}`。
+        `bad` 为空就是这条线整条通到核心；否则每项告诉你哪一格断在什么原因上。
+
+        **这就是「一个回合应该干的事」的样子**：不是下一次单，是做完一件事并验证它。
+        """
+        r = self.place_path(points, block, rot=rot)
+        self.poll_until(
+            lambda: all(self.building_at(px, py) for (px, py) in points),
+            timeout=timeout)
+        bad = []
+        for (px, py) in points:
+            good, _path, why = self.trace(px, py)
+            if not good:
+                bad.append(((px, py), why))
+        return {"laid": len(points), "bad": bad,
+                "rotations": (r or {}).get("rotations") if isinstance(r, dict) else None}
+
 
 def load_admin_token(cfg_path=r"C:\dsh\ai-arena\server-run\config\ai-arena.json"):
     """读**裁判（admin）**凭据：环境变量 ARENA_ADMIN_TOKEN 优先，兜底组织者专用文件。
