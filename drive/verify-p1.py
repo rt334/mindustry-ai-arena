@@ -110,7 +110,7 @@ def main():
     print("\n== A7 /place 的 config 生效 ==")
     ct = a.get("content").get("blocks", [])
     sorter = next((b for b in ct if b.get("name") == "sorter"), None)
-    print(f"  sorter 成本: {sorter.get('requirements') if sorter else '未找到'}")
+    print(f"  sorter 成本: {sorter.get('cost') if sorter else '未找到'}")
     # 拿一个真实存在的、带配置的方块做对照
     print(f"  sorter 声明支持的配置类型: "
           f"{[k for k in (sorter or {}).keys() if k in ('configurations', 'configType')]}"
