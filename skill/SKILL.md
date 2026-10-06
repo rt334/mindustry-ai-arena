@@ -9,7 +9,7 @@ description:
   本 skill 只讲**怎么调用接口**，不含任何游戏内容。
 metadata:
   author: Little Code Sauce
-  version: "1.5.0"
+  version: "1.5.1"
 ---
 
 # ai-arena Skill
@@ -62,6 +62,15 @@ for($i=0; $i -lt 120; $i++){
 不代表已经生效。固定等待会产出「看起来成功、其实没有」的假结论。
 
 Python 侧用 `arena.poll_until(pred, timeout)`，库里没有任何裸 `time.sleep(N)`。
+
+**「窗口」不是「等待」。** `/rates?window=N` 是**回看**最近 N 秒的库存差，
+服务端每 5 tick 采一次、缓冲覆盖 120 秒，所以调用**立即返回** —— 任何时刻都能问。
+
+- **验证刚做的改动** → 短窗口（`window=3`）：几乎无滞后，看 `delta` 的符号和量级
+- **看稳定产率** → 长窗口（`window=30`）：抹掉瞬时波动
+
+长窗口会把刚下的改动**稀释**掉（30 秒里有 25 秒是改动前的数据），
+那才是「改了却看不出效果」的常见原因 —— 不是没生效。
 
 ---
 
@@ -131,7 +140,7 @@ $aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Enco
 | `/map` | `x y w h` [`view=all`] | 地形与地表信息（受视野过滤） |
 | `/buildings` | — | 己方建筑 |
 | `/units` | — | 己方单位 |
-| `/rates` | `window` | 资源变化速率 |
+| `/rates` | `window` | 资源变化速率。**回看**最近 window 秒，立即返回 —— 验刚做的改动用 `3`，看稳定值用 `30` |
 | `/stalls` | — | 产线异常警报（堵塞、缺料、满仓） |
 | `/watch` | `since` | 「值得注意」的聚合判定：`clear` 为真表示现在没事，可以睡到下一次事件（配合 `/stream` 或 `/events` 的游标） |
 | `/drill` | — | 己方矿机状态 |
