@@ -65,7 +65,10 @@ EXEMPT = re.compile(r"boundary-ok\s*[:：]?\s*(.+)")
 # 自测样本：每条「违规规则」至少要能命中一个 ——
 # 否则规则形同虚设，而报告会显示「违规 0」，看起来像一切正常（假绿）。
 SELFTEST = [
-    ("引擎内幕", "煤的 hardness = 2，钻机每 500 帧出一个"),
+    # 第一条用**真正的内部符号**（getDrillTime / sizeOffset），不再用 `hardness = 2` ——
+    # 后者现在由「方块参数」规则负责抓（2026-10-06 改规则时自测抓到的连带变化：
+    # 把 hardness 从「引擎内幕」移出后，这个样本的命中规则换了，期望值也得跟着换）。
+    ("引擎内幕", "钻速由 getDrillTime 与 sizeOffset 决定"),
     ("产率数字", "单台机械钻约 0.35/s，实测核心铜 +2.04/s"),
     ("地图名", "在 veins 上开局，或者选 passage"),
     ("方块参数", "pneumatic-drill tier: 3，itemCapacity=10"),
