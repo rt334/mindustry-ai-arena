@@ -642,7 +642,36 @@ progress=0.99  rate=0.70  eta=0
 
 ### `GET /database`
 
-汇总数据库。
+**对应游戏里的「数据库」界面**，而且多做了一件游戏内做不到的事：**反查**。
+四个分支按参数优先级：
+
+| 参数 | 做什么 |
+|---|---|
+| `item=<物品名>` | **反查**：谁产它、谁吃它、哪些矿机能挖它 |
+| `q=<关键词>` | 跨 方块 / 物品 / 单位 / 液体 搜名字与介绍 |
+| `cat=<分类名>` | 列出该分类下的方块（带 `requirements`） |
+| （无参数） | 索引：分类清单 + 物品清单 |
+
+`limit` 默认 60、范围 1–400。物品名不存在时返回 `404 / 1002`。
+
+#### `?item=` 是它最有用的一支
+
+```json
+{"item":"silicon","localizedName":"硅","hardness":0,
+ "producerCount":9,"producers":[{"name":"silicon-smelter","how":"crafter","size":2}, …],
+ "consumerCount":18,"consumers":[{"name":"surge-smelter","how":"items x3"}, …],
+ "drills":[{"name":"laser-drill","tier":4,"size":3}, …]}
+```
+
+「缺硅怎么办」这类问题不必靠试错：`producers[]` 直接给出能产它的方块与**方式**
+（`crafter` = 加工、`drill(tier N)` = 挖），`drills[]` 是**按 `tier >= 该物品的 hardness` 过滤过**的
+可挖矿机清单。「谁在吃铜」同理。
+
+`how` 是**分类标签**、不是配方数字（`items x3` 表示吃三种物品）；配方本身在 `/block?name=<方块>`。
+
+**方块详情不在这个端点里，用 `/block?name=`** —— 那边给得更全（成本 / 输入 / 输出 / 尺寸）。
+（2026-10-06：`/database` 此前还有一对「读进来但从未使用」的 `block=` / `type=` 参数，
+传了会静默落到索引分支，而 `usage` 文案却宣称支持 `block=` —— 已删掉并改正文案。）
 
 ### `GET /events`
 

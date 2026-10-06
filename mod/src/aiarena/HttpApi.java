@@ -931,10 +931,12 @@ public final class HttpApi {
 
         String q = p.get("q", null);
         String itemName = p.get("item", null);
-        String blockName = p.get("block", null);
         String catName = p.get("cat", null);
-        String type = p.get("type", null);        // block|item|unit|liquid
         int limit = Math.min(Math.max(p.getInt("limit", 60), 1), 400);
+        // 注：这里曾经还读 `block=` 与 `type=` 两个参数，但它们读进来后从未被用到 ——
+        // 传了会静默落到「无参数索引」分支，而 usage 文案还宣称支持 `block=`，
+        // 等于接口自己给了错信息（2026-10-06 实测发现）。方块详情请用 /block?name=，
+        // 类型过滤请用 /block?name=（它不传 name 时列全部可放置方块）。
 
         ensureBundle();
 
@@ -1120,7 +1122,7 @@ public final class HttpApi {
 
         respond(ex, 200, Json.ok(new Json.Obj()
             .put("agent", agent.id)
-            .put("usage", "q=<关键词> 搜索 | item=<物品> 反查谁产谁吃 | cat=<分类> 列方块 | block=<方块> 详情")
+            .put("usage", "q=<关键词> 搜索 | item=<物品> 反查谁产谁吃 | cat=<分类> 列方块 | 方块详情用 /block?name=<方块>")
             .put("categories", cats.size())
             .putRaw("categoryCounts", catArr.toString())
             .putRaw("items", items.toString())
