@@ -831,10 +831,13 @@ AI 186 建筑 / 7 台钻机（**全部 mechanical**）/ 铜 +0.47 铅 +0.37 沙 
 | `/stalls` 返回**全图所有队伍** | 它一次拿到 40 条，**39 条是对手的**；自己那条缺煤报警只是 1/40。它读了 25 次告警，没有一次朝自己那条 15 格的煤线去 | 已修 `51d6dac`（按 `view` 裁剪，判据与 `/buildings` 逐字一致） |
 | `/block` 的 `outputs` 不覆盖泵类 | `water-extractor` 的 `outputs` 是 `[]` —— 它对 AI 的回答是「**这个方块什么都不产**」 | 已修 `d0c7ce9`（补 `SolidPump` / `Pump` 分支 + `baseEfficiency` / `attribute`） |
 | `/database?item=` 不认液体 | `?item=water` 返回 **404 `unknown item`** —— 而「谁产它」本是这个端点存在的理由 | 已修 `125fc8a`（液体走独立分支，`producers[]` 的 `how` 区分 crafter / solid-pump / pump） |
+| **转运件在 `/block` 里是空数组** | `junction` / `router` / `sorter` / `overflow-gate` / `underflow-gate` / 各类桥与卸载器的 `inputs` 与 `outputs` **都是 `[]`** —— 而「怎么送」是它们唯一的语义。AI 据此认定这一类「什么都不做」，整局没建过任何分流件：223 条传送带的 `sendsTo` 长度全为 1，7 台钻机配 177 条带 ≈ 7 条「钻机直线回核心」，「一路料分给八台设备」在它那边**没有名字** | 已修 `fe667e8`（`outputs` 加 `kind=transport` + `how` + `note`，覆盖 39 个方块；`how` 用引擎 `invert` 区分 `sorter`/`inverted-sorter`、`overflow-gate`/`underflow-gate`） |
 | `AUTO_SPECTATE` 默认 `true` | 真人一连入就被移出队伍、清掉单位 —— 那一局靠 `-Darena.autospectate=false` 才进得去 | 已修：默认保持 `true`（观战端 mod 靠服务端标 spectator），改由 `-Darena.players=<名字>` 白名单回答「谁该当玩家」 |
+| **菜单状态下接口「坏了一半」** | `postToGame` 的每 tick 写预算按 `Vars.state.tick` 重置，而菜单状态 tick **恒为 0** ⇒ 预算用尽一次后，**所有走主线程的端点永久回 1007（HTTP 504）**，不走主线程的 `/ping`、`/state` 却正常。实测连打 40 次 `/diag` 即触发，报的还是「game thread did not respond」这种误导说法 | 已修 `fe667e8`（没在游戏中就不做预算限制）；修后 40 次全部 200 |
 
-**三条伤在水这一件事上，串起来是同一句话**：`找不到` 和 `不存在` 在接口上返回同一个东西，
-所以 AI 无法区分。**它的推理没有错，是我的接口答了「没有」。**
+**这一整批伤在同一句话上**：`找不到` 和 `不存在` 在接口上返回同一个东西，
+所以 AI 无法区分。**它的推理没有错，是接口答了「没有」** ——
+而它每次都去问了：水（三处）、矿脉、转运件。
 
 ### 13.6 值得留下的正面结论
 
