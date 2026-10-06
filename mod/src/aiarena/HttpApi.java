@@ -3924,6 +3924,13 @@ public final class HttpApi {
         String mapName = p.get("map", null);
         boolean wantFog = !"false".equalsIgnoreCase(p.get("fog", "true"));
         boolean wantUnits = !"false".equalsIgnoreCase(p.get("units", "true"));
+        // 沙盒：给**演示/练习**用的显式例外 —— 建造不耗材料、核心库存无限。
+        //
+        // 它默认关，而且改动的是「你这局怎么玩」，不是「谁能看什么」，
+        // 所以不触及对等约束。要开也必须是裁判（本方法本身已经 referee-only），
+        // 并且 `infiniteResources` 会出现在 `/diag` 的 `rules` 里 ——
+        // 一局是不是沙盒，事后查得到。
+        boolean wantSandbox = "true".equalsIgnoreCase(p.get("sandbox", "false"));
 
         // setup 必须跨帧执行。
         //
@@ -4007,7 +4014,11 @@ public final class HttpApi {
             // 核心的初始库存来自地图定义，够放下第一批建筑；不够时可以让核心单位
             // 手动挖矿（原版 MinerComp 路径，见 /mine），挖到的矿在 mineTransferRange
             // 内会直接进核心。
-            r.infiniteResources = false;
+            //
+            // 唯一的例外是显式的 `?sandbox=true`（裁判专用，给演示与练习）——
+            // 那种局面下 `infiniteResources` 会在 `/diag` 的 `rules` 里显形，
+            // 所以「这局是不是沙盒」事后查得到。
+            r.infiniteResources = wantSandbox;
             r.buildCostMultiplier = 1f;
             r.buildSpeedMultiplier = 1f;
 

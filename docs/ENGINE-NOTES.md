@@ -1278,3 +1278,118 @@ public void hit(Bullet bullet){
 修之前它对这类方块会回显传入值（传 2 回 2），**等于承诺一个引擎里不存在的朝向** ——
 而 `/buildings` 回读是 0，两者对不上。实测六组：sorter `2→0`、`0→0`；
 conveyor `2→2`、`0→0`、`9→1`、`-1→3`。
+
+---
+
+## 三十四、`overflow-gate` / `underflow-gate` 的 `rotation` 是**位掩码**，不是朝向
+
+**这是 §三十三 漏掉的第三种情况。** §三十三 说「`rotate=false` 的方块 `rotation` 恒为 0」——
+那说的是 `sorter` 这类。而 gate 是第三种：**引擎把它的 `rotation` 当作一个四位的
+轮转记录器**，所以 `/buildings` 里能读到 **8、10 这种超出 0–3 的值**。
+
+源码（`OverflowGate.getTileTarget`）：
+
+```java
+int from = relativeToEdge(src.tile);          // 货从哪条边进来
+Building to = nearby((from + 2) % 4);         // 默认：直行穿过
+…
+Building a = nearby(Mathf.mod(from - 1, 4));  // 来货边两侧
+Building b = nearby(Mathf.mod(from + 1, 4));
+…
+if(ac && !bc)      to = a;
+else if(bc && !ac) to = b;
+else{
+    // 两侧都能收 → 按 rotation 的**对应位**决定走哪边，并翻转那一位
+    to = (rotation & (1 << from)) == 0 ? a : b;
+    if(flip) rotation ^= (1 << from);
+}
+```
+
+所以 `rotation` 的 bit `from` 记录的是「从这条边来的货，上次走了 a 还是 b」。
+`rot=8` = bit 3 置位；`rot=10` = bit 3 + bit 1 同时置位。
+
+| 方块 | `rotation` 是什么 | 取值 |
+|---|---|---|
+| `conveyor` / 钻机 / 炮塔 | **朝向** | 0–3 |
+| `sorter` 这类 `rotate = false` | 无意义，恒 0 | 0 |
+| **`overflow-gate` / `underflow-gate`** | **轮转状态（位掩码）** | 0–15 |
+
+**对 AI 的影响**：拿到 `rot=8` 只会有两种反应 —— 要么以为朝向字段坏了，
+要么按「0–3 之外一律非法」忽略掉。而**这一位恰恰是「分配是否公平」的唯一记录**。
+
+**接口侧尚未处理**：`/buildings` 对所有方块统一叫 `rotation`。
+按 §三十三 的先例（`appliedRot` 对 `rotate=false` 给 0），这里也该区分语义 ——
+否则同一个字段名在三种方块上是三件不同的事。
+
+---
+
+## 三十五、一进八出的分配列（2026-10-06 实测范式）
+
+**背景**：8 台 `silicon-smelter` 要同时运转，而沙与煤各只有一路。
+
+**结构**（坐标实测，`x=285..299, y=78..90`）：
+
+```
+x:      286  287  288  289  290  291  292  293  294  295
+y=78                     tconv ←←←←←←←←←←←←←←←←←←←←←←  进货（自东向西）
+y=79                     tconv
+y=80    tconv            tconv
+y=81    tconv SMELT SMELT conv junc  uflow conv SMELT SMELT tconv
+y=82    tconv SMELT SMELT conv uflow junc  conv SMELT SMELT tconv
+y=83    tconv SMELT SMELT conv junc  uflow conv SMELT SMELT tconv
+y=84    tconv SMELT SMELT conv uflow junc  conv SMELT SMELT tconv
+y=85    tconv SMELT SMELT conv junc  uflow conv SMELT SMELT tconv
+y=86    tconv SMELT SMELT conv uflow junc  conv SMELT SMELT tconv
+y=87    tconv SMELT SMELT conv junc  uflow conv SMELT SMELT tconv
+y=88    tconv SMELT SMELT conv uflow junc  conv SMELT SMELT tconv
+y=89                     tconv                             tconv tconv DRILL
+y=90                     tconv                             tconv tconv DRILL
+…
+y=102  两条主干南下到底后拐进核心 (287,102)-(291,106)
+```
+
+**三个部件的分工**：
+
+| 部件 | 位置 | 作用 |
+|---|---|---|
+| **分配列** | `x=290` 与 `x=291`，**`junction` 与 `underflow-gate` 逐行交替、两列相位相反** | 让每一层都往两侧送货，同时保留一股继续向下的流 |
+| **支线** | `x=289`（`rot=2` 向西）与 `x=292`（`rot=0` 向东），**每行各一条** | 把分配列的货拐进左右两侧的炉子 |
+| **主干** | `x=286` 与 `x=295`，`rot=1` 向南 | 成品一路向下，到底再拐进核心 |
+
+炉子是 2×2，所以 `(288,81)` 与 `(288,82)` **同属第一台** ——
+即每台炉子有**两个入口**，上下两条支线各供一个。
+
+**实测行为（tick 16145）**：
+
+```
+核心净产率    silicon +7.12/s
+(287,81) eff=1.0  sand 10 coal 10
+(293,81) eff=1.0  sand 10 coal 10
+(287,83) eff=1.0  sand 10 coal 10
+(293,83) eff=1.0  sand  9 coal 10
+(287,85) eff=1.0  sand 10 coal  1     ← 刚接上
+(293,85) eff=0.0  sand 10             ← 无煤
+(287,87) eff=0.0  sand 10
+(293,87) eff=0.0  sand 10
+```
+
+**读法**：这是**上游优先**的分配 —— 货先喂满靠上的炉子，剩下的才往下走。
+8 台满速应为 `8 × 1.5 = 12/s`，实测 7.12/s ⇒ **59%**。
+
+**瓶颈在供给速率，不在分配结构**：煤的进料约 7.12/s，而 8 台满速要 12/s。
+所以「上游吃满、下游空转」不是分配列的问题 ——
+**把煤的产率提上去，这 8 台会一起提速**；分配列本身没有把货卡住。
+
+### 为什么 `junction` 与 `underflow-gate` 交替
+
+| 件 | 从北边来的货 |
+|---|---|
+| `junction` | 四向均分：东 / 西 / 南各一份 —— **总有货继续往下** |
+| `underflow-gate` | **优先两侧**（东西），两侧都不收才直行 —— **截留强，往下少** |
+
+两者交替 = 「放行一层、截留一层」的节奏。**这和 §十七 是同一件事的两面**：
+`junction` 只穿过、不停留；`gate` 才做带优先级的截留。
+
+**尚未验证**：交替是否必要。全是 `junction` 会均分但每层都不够；全是 `gate` 会让上层吃光。
+按 §二十五 的纪律这属于「一次只改一个变量」才能回答的问题 ——
+需要一局对照实验，**不要凭机理推断当结论**。
