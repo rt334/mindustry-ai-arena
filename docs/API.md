@@ -863,11 +863,19 @@ progress=0.99  rate=0.70  eta=0
 | `mass-driver` | 把货物抛射到配对的接收端 |
 | `unloader` / `directional-unloader` | 从相邻容器或核心取货送出 —— **核心是终点，得有它才能把库存取出来** |
 
-> 为什么补这一段：`kind` 是 `transport` 的这批方块，`inputs` 与 `outputs` **曾经都是空数组**。
-> AI 据此得到的结论是「这一类方块什么都不做」—— 它整局没建过任何分流件，
-> 223 条传送带的 `sendsTo` 长度全部为 1（只有链、没有扇出），
-> 于是「一路料分给八台设备」这种做法在它那边**根本没有名字**。
-> 这是同一类缺口的第四次（泵类、液体、矿脉各一次）：**它每次都去问了，每次都得到「那个东西没用」。**
+> **为什么补这一段，以及一个我先前的误判。** 这批方块的 `inputs` 与 `outputs` 确实**是空数组**，
+> 我当时据此写下「接口告诉 AI 这一类什么都不做」。**这是错的** —— 同一个响应里的
+> `description` 一直写着规则，而且 `/database?q=` 连中文描述一起搜：
+>
+> ```
+> block.underflow-gate.description = 与溢流门相反，当两侧均堵塞时才向前运输。
+> block.overflow-gate.description  = 当前方被阻塞时才会向两侧输出，用于处理多余的物品。
+> /database?q=溢流  → overflow-gate, underflow-gate, overflow-duct, underflow-duct
+> ```
+>
+> 所以缺的**不是信息，是形式**：规则以**散文**存在（`description`），结构以**字段**存在
+> （`inputs` / `outputs`），而字段那一半是空的 —— AI 读字段、不读散文。
+> `transport` 条目的价值因此要说准：**不是补上缺失，是把已经写着的规则翻成可机读的形式。**
 
 **泵类的 `baseEfficiency` / `attribute` 是回答「它非要建在水源上吗」的两个字段**：产能 = `baseEfficiency + 脚下的 attribute 值`，而 `attribute` 只是**加成**项。只看 `attribute=water` 会得出「没水就不能用」——那是错的。
 
