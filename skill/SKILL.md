@@ -9,7 +9,7 @@ description:
   本 skill 只讲**怎么调用接口**，不含任何游戏内容。
 metadata:
   author: Little Code Sauce
-  version: "1.7.0"
+  version: "1.8.0"
 ---
 
 # ai-arena Skill
@@ -82,6 +82,31 @@ for($i=0; $i -lt 120; $i++){
 
 **为什么较真**：本项目的建造类是**排队**的 —— 接口返回成功只代表请求入队，
 不代表已经生效。固定等待会产出「看起来成功、其实没有」的假结论。
+
+**第四条纪律：实测与推理冲突时，先怀疑推理。**
+
+**这条比它听起来重要得多，而且它是本项目里被违反最多的一条。**
+
+如果 `/drill` 说某台机器 `dominantItem=coal`、`itemsPerSecond=0.34`，
+而你的某条推理说「这个机器挖不了煤」——**错的是推理**。
+去改推理，**不要**因此宣布「这个字段不可信」「这个接口在误导我」。
+
+引擎给的字段是从**真实世界状态**读出来的；你的推理是从**记忆和习惯**推出来的。
+两者的可信度不在一个量级上。
+
+具体到会被违反的几处：
+
+- **`/ore` 的 `canMine` / `mineable`**、**`/drill` 的 `dominantItem` / `itemsPerSecond`** ——
+  这些是实测值。它们和你的直觉不符时，**是直觉错了**。
+- **`/database` 的 `producers`** —— 它列出的是**实际能产它的方块**。
+  你觉得某个方块「级别不够」时，先去做一台试试，而不是先宣布清单有问题。
+- **`/place` 的 `appliedRot` / `anchorX` / `anchorY`** —— 那是引擎实际记下的值，不是回显。
+
+> 实测记录（2026-10-06）：有个 agent 因为「煤的硬度超过了它以为的上限」这条推理，
+> 先是误判煤不可采、把整条煤线推迟了约 8 个回合；随后在实测已经证明能采的情况下，
+> 又把它读到的 `canMine: true` 和 `/database` 的产出方清单**都判定为"不可信"** ——
+> 而它同一份报告里明明写着那台机器正在出煤。
+> **把推理的错记到数据头上，比推理错本身危险得多** —— 那会毁掉你唯一可靠的东西。
 
 Python 侧用 `arena.poll_until(pred, timeout)`，库里没有任何裸 `time.sleep(N)`。
 
@@ -184,7 +209,7 @@ $aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Enco
 
 | 接口 | 参数 | 说明 |
 |---|---|---|
-| `/place` | `x y block [rot] [config] [unit]` | 下建造请求（排队，须轮询确认）；批量用 `shape=`：`line` `area` `rect` `outline` `circle` `point` `path` |
+| `/place` | `x y block [rot] [config] [unit]` | 下建造请求（排队，须轮询确认）；批量用 `shape=`：`line` `area` `rect` `outline` `circle` `point` `path`。**返回体带 `appliedRot` / `anchorX` / `anchorY` / `size`** —— 多格方块的 `anchorX/Y` 就是它在引擎里的左上角，**算边界直接读它，别自己推 `中心 ± size/2`** |
 | `/break` | `x y` | 拆除 |
 | `/config` | `x y value=` | 设置方块配置 |
 | `/command` | `action=...` + `units=` | 指挥单位（8 种 action）：`move` `attackUnit` `assistBuilding` `setCommand` `setStance` `commandBuilding` `requestItem` `transferInventory` |
