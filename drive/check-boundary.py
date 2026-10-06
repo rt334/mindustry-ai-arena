@@ -28,10 +28,16 @@ ROOT = Path(__file__).resolve().parent.parent
 TARGET = ROOT / "skill"
 
 # ---- 违规规则：(名称, 正则, 理由) ----
+# ⚠ 不要把**接口返回的字段名**列进来。
+# `hardness` / `dominantItem` / `oreHardness` / `canMine` 这些是 `/ore`、`/drill` 的返回字段 ——
+# 参赛者本来就该读、文档也该写。把它们当「引擎内幕」禁掉，后果是**规则逼人别写接口说明**。
+# 数值本身仍受下面「方块参数」规则约束（`hardness = 2` 照样抓得到）。
+# （2026-10-06 实测：这条规则误报了 SKILL.md 里两处引用 `/drill` 字段的地方。
+#   教训与「先怀疑推理」同源 —— 写规则时也要核实，别凭名字像不像。）
 RULES: list[tuple[str, re.Pattern, str]] = [
-    ("引擎内幕", re.compile(r"hardness|drillTime|getDrillTime|liquidBoostIntensity|"
-                            r"dominantItems?|sizeOffset|hardnessDrillMultiplier"),
-     "引擎公式/字段属于「实测出来的游戏内情」，玩家看不到"),
+    ("引擎内幕", re.compile(r"drillTime|getDrillTime|liquidBoostIntensity|"
+                            r"sizeOffset|hardnessDrillMultiplier"),
+     "引擎公式/内部符号属于「实测出来的游戏内情」，玩家看不到"),
     ("产率数字", re.compile(r"[+\-]?\d+\.\d+\s*/\s*s"),
      "带小数的每秒产率是实测结论（限流写成整数 60/s，不会命中这条）"),
     ("地图名", re.compile(r"\b(veins|glacier|passage)\b"),
