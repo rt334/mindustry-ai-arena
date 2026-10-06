@@ -57,6 +57,22 @@ Rep ""
 # ---------------------------------------------------------------- 启动
 
 Say "启动服务器"
+
+# 裁判凭据必须在启动服务器**之前**设进环境变量 —— 服务器侧只认它（fail-closed）。
+if ([string]::IsNullOrWhiteSpace($env:ARENA_ADMIN_TOKEN) -or $env:ARENA_ADMIN_TOKEN.Length -lt 16) {
+    $tokenFile = Join-Path $RunDir "admin-token.txt"
+    if (Test-Path $tokenFile) {
+        $env:ARENA_ADMIN_TOKEN = (Get-Content $tokenFile -Raw -Encoding UTF8).Trim()
+    } else {
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $b = New-Object byte[] 24
+        $rng.GetBytes($b)
+        $env:ARENA_ADMIN_TOKEN = ($b | ForEach-Object { $_.ToString("x2") }) -join ''
+        Set-Content -Path $tokenFile -Value $env:ARENA_ADMIN_TOKEN -Encoding UTF8 -NoNewline
+        Write-Host "  已生成裁判凭据 -> $tokenFile" -ForegroundColor Yellow
+    }
+}
+
 $srvOut = Join-Path $diagDir 'server-out.log'
 $srvErr = Join-Path $diagDir 'server-err.log'
 $srv = Start-Process -FilePath $JavaExe -ArgumentList '-Djava.net.preferIPv4Stack=true','-jar',$ServerJar `
@@ -71,7 +87,15 @@ for ($i = 0; $i -lt 60; $i++) {
 Step "就绪"
 
 $cfg = Get-Content (Join-Path $RunDir "config\ai-arena.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-$ref = ($cfg.agents | Where-Object { $_.admin } | Select-Object -First 1).token
+# 裁判凭据：环境变量优先，兜底组织者专用文件（admin 凭据不再从 ai-arena.json 读）
+$ref = $env:ARENA_ADMIN_TOKEN
+if ([string]::IsNullOrWhiteSpace($ref) -or $ref.Length -lt 16) {
+    $tf = Join-Path $RunDir "admin-token.txt"
+    if (Test-Path $tf) { $ref = (Get-Content $tf -Raw -Encoding UTF8).Trim() }
+}
+if ([string]::IsNullOrWhiteSpace($ref)) {
+    throw "没有裁判凭据：先设 ARENA_ADMIN_TOKEN，或跑一次 start-arena.ps1 生成 admin-token.txt"
+}
 $fighters = @($cfg.agents | Where-Object { -not $_.admin })
 $H = @{ Authorization = "Bearer $ref" }
 

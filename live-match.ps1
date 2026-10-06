@@ -1,4 +1,4 @@
-# AI 竞技场 · 起一局完整对抗 + 打开观战
+﻿# AI 竞技场 · 起一局完整对抗 + 打开观战
 #
 # 顺序很关键（踩过坑）：
 #   1. setup  加载地图、放核心、生成建造单位 —— 需要进入 playing 状态
@@ -75,6 +75,23 @@ Start-Sleep -Seconds 3
 # ---------------------------------------------------------------- 服务器
 
 Say "启动服务器"
+
+# 裁判凭据必须在启动服务器**之前**设进环境变量 —— 服务器侧只认它（fail-closed）。
+# 配置文件里的 admin token 已被忽略，理由见 docs/CONDITIONS.md 事故记录第 6 条。
+if ([string]::IsNullOrWhiteSpace($env:ARENA_ADMIN_TOKEN) -or $env:ARENA_ADMIN_TOKEN.Length -lt 16) {
+    $tokenFile = Join-Path $RunDir "admin-token.txt"
+    if (Test-Path $tokenFile) {
+        $env:ARENA_ADMIN_TOKEN = (Get-Content $tokenFile -Raw -Encoding UTF8).Trim()
+    } else {
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $b = New-Object byte[] 24
+        $rng.GetBytes($b)
+        $env:ARENA_ADMIN_TOKEN = ($b | ForEach-Object { $_.ToString("x2") }) -join ''
+        Set-Content -Path $tokenFile -Value $env:ARENA_ADMIN_TOKEN -Encoding UTF8 -NoNewline
+        Write-Host "  已生成裁判凭据 -> $tokenFile" -ForegroundColor Yellow
+    }
+}
+
 $outLog = Join-Path $RunDir "live-out.log"
 $errLog = Join-Path $RunDir "live-err.log"
 Remove-Item $outLog, $errLog -Force -ErrorAction SilentlyContinue
@@ -94,7 +111,16 @@ for ($i = 0; $i -lt 60; $i++) {
 Step "就绪"
 
 $cfg = Get-Content (Join-Path $RunDir "config\ai-arena.json") -Raw -Encoding UTF8 | ConvertFrom-Json
-$ref = ($cfg.agents | Where-Object { $_.admin } | Select-Object -First 1).token
+# 裁判凭据：环境变量优先，兜底组织者专用文件。配置文件里那条明文已被服务器忽略
+# （admin 凭据一律不从 ai-arena.json 读 —— 它与参赛 AI 同机可读）。见 CONDITIONS.md 事故记录第 6 条。
+$ref = $env:ARENA_ADMIN_TOKEN
+if ([string]::IsNullOrWhiteSpace($ref) -or $ref.Length -lt 16) {
+    $tf = Join-Path $RunDir "admin-token.txt"
+    if (Test-Path $tf) { $ref = (Get-Content $tf -Raw -Encoding UTF8).Trim() }
+}
+if ([string]::IsNullOrWhiteSpace($ref)) {
+    throw "没有裁判凭据：先设 ARENA_ADMIN_TOKEN，或跑一次 start-arena.ps1 生成 admin-token.txt"
+}
 $fighters = @($cfg.agents | Where-Object { -not $_.admin })
 
 # ---------------------------------------------------------------- setup

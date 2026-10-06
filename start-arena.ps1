@@ -64,6 +64,32 @@ Write-Host "  运行目录    $RunDir"
 $busy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($busy) { throw "端口 $Port 已被占用（PID $($busy.OwningProcess)）" }
 
+# ---------------------------------------------------------------- 裁判凭据
+
+# admin 凭据**不再放在 ai-arena.json 里** —— 那个文件与参赛 AI 同机、可读
+# （skill 文档一度还教过怎么从它取 admin token）。服务器侧现在只认环境变量
+# ARENA_ADMIN_TOKEN；本机工具的凭据来源顺序同上，兜底是一份组织者专用文件。
+# 见 docs/CONDITIONS.md 事故记录第 6 条。
+
+$tokenFile = Join-Path $RunDir "admin-token.txt"
+
+$adminToken = $env:ARENA_ADMIN_TOKEN
+if ([string]::IsNullOrWhiteSpace($adminToken) -or $adminToken.Length -lt 16) {
+    $adminToken = $null
+    if (Test-Path $tokenFile) {
+        $adminToken = (Get-Content $tokenFile -Raw -Encoding UTF8).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($adminToken) -or $adminToken.Length -lt 16) {
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $bytes = New-Object byte[] 24
+        $rng.GetBytes($bytes)
+        $adminToken = ($bytes | ForEach-Object { $_.ToString("x2") }) -join ''
+        Set-Content -Path $tokenFile -Value $adminToken -Encoding UTF8 -NoNewline
+        Write-Host "  已生成裁判凭据 -> $tokenFile" -ForegroundColor Yellow
+    }
+}
+$env:ARENA_ADMIN_TOKEN = $adminToken
+
 # ---------------------------------------------------------------- 启动服务器
 
 Write-Head "启动服务器"
@@ -114,6 +140,10 @@ $refAgent = $cfg.agents | Where-Object { $_.admin } | Select-Object -First 1
 $fighters = $cfg.agents | Where-Object { -not $_.admin }
 
 if (-not $refAgent) { throw "配置里没有 admin agent（裁判）" }
+
+# 裁判凭据来自环境变量 / 组织者专用文件（上面那一段），**不读配置文件里的明文** ——
+# 服务器侧已忽略后者，这里跟着保持一致。
+$refToken = $adminToken
 
 # 参战 agent 不够时自动补足 —— 让「-Agents N」真的能一条命令起一局。
 # 新 agent 用默认队伍 id（100 起，跳过已占用的），地图核心不够时由 setup 自建核心。
@@ -189,7 +219,7 @@ Write-Host ("  参战    {0}" -f (($fighters | ForEach-Object { $_.id }) -join '
 Write-Head "初始化对局（$Map）"
 
 $setupUrl = "http://127.0.0.1:$Port/v1/$($refAgent.id)/setup?map=$Map&fog=$($Fog.ToString().ToLower())"
-$setup = Invoke-RestMethod -Uri $setupUrl -Headers @{ Authorization = "Bearer $($refAgent.token)" } -TimeoutSec 30
+$setup = Invoke-RestMethod -Uri $setupUrl -Headers @{ Authorization = "Bearer $refToken" } -TimeoutSec 30
 
 if (-not $setup.ok) { throw "setup 失败: $($setup.error)" }
 
@@ -207,7 +237,7 @@ if ($setup.data.cores) {
 if ($Record) {
     Write-Head "开始录像"
     $rec = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/$($refAgent.id)/record?action=start&label=$Map" `
-        -Method Post -Headers @{ Authorization = "Bearer $($refAgent.token)" } -TimeoutSec 15
+        -Method Post -Headers @{ Authorization = "Bearer $refToken" } -TimeoutSec 15
     if ($rec.ok) { Write-Host "  $($rec.data.message)" } else { Write-Host "  失败: $($rec.error)" -ForegroundColor Yellow }
 }
 
@@ -252,7 +282,7 @@ if ($KeepRunning) {
             Start-Sleep -Seconds 2
             try {
                 $s = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/v1/$($refAgent.id)/state?view=all" `
-                    -Headers @{ Authorization = "Bearer $($refAgent.token)" } -TimeoutSec 3
+                    -Headers @{ Authorization = "Bearer $refToken" } -TimeoutSec 3
                 $line = "  tick=$($s.data.tick)  单位=$($s.data.units.Count)  建筑=$($s.data.buildings.Count)  队伍=$($s.data.teams.Count)"
                 Write-Host $line
             } catch { }

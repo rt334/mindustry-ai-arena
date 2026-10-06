@@ -80,6 +80,21 @@ Say "启动服务器"
 $busy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
 if ($busy) { throw "端口 $Port 已被占用" }
 
+# 裁判凭据必须在启动服务器**之前**设进环境变量 —— 服务器侧只认它（fail-closed）。
+if ([string]::IsNullOrWhiteSpace($env:ARENA_ADMIN_TOKEN) -or $env:ARENA_ADMIN_TOKEN.Length -lt 16) {
+    $tokenFile = Join-Path $RunDir "admin-token.txt"
+    if (Test-Path $tokenFile) {
+        $env:ARENA_ADMIN_TOKEN = (Get-Content $tokenFile -Raw -Encoding UTF8).Trim()
+    } else {
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $b = New-Object byte[] 24
+        $rng.GetBytes($b)
+        $env:ARENA_ADMIN_TOKEN = ($b | ForEach-Object { $_.ToString("x2") }) -join ''
+        Set-Content -Path $tokenFile -Value $env:ARENA_ADMIN_TOKEN -Encoding UTF8 -NoNewline
+        Write-Host "  已生成裁判凭据 -> $tokenFile" -ForegroundColor Yellow
+    }
+}
+
 $outLog = Join-Path $RunDir "stress-out.log"
 $errLog = Join-Path $RunDir "stress-err.log"
 Remove-Item $outLog, $errLog -Force -ErrorAction SilentlyContinue
@@ -103,7 +118,14 @@ Write-Host "  就绪" -ForegroundColor Green
 $cfg = Get-Content (Join-Path $RunDir "config\ai-arena.json") -Raw -Encoding UTF8 | ConvertFrom-Json
 $refAgent = $cfg.agents | Where-Object { $_.admin } | Select-Object -First 1
 $fighters = @($cfg.agents | Where-Object { -not $_.admin })
-$refTok = $refAgent.token
+$refTok = $env:ARENA_ADMIN_TOKEN
+if ([string]::IsNullOrWhiteSpace($refTok) -or $refTok.Length -lt 16) {
+    $tf = Join-Path $RunDir "admin-token.txt"
+    if (Test-Path $tf) { $refTok = (Get-Content $tf -Raw -Encoding UTF8).Trim() }
+}
+if ([string]::IsNullOrWhiteSpace($refTok)) {
+    throw "没有裁判凭据：先设 ARENA_ADMIN_TOKEN，或跑一次 start-arena.ps1 生成 admin-token.txt"
+}
 $tok0 = $fighters[0].token
 $id0 = $fighters[0].id
 

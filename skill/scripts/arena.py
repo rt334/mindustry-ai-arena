@@ -226,8 +226,54 @@ class Arena:
         return self.poll_until(lambda: self.building_at(x, y), timeout=timeout)
 
 
+def load_admin_token(cfg_path=r"C:\dsh\ai-arena\server-run\config\ai-arena.json"):
+    """读**裁判（admin）**凭据：环境变量 ARENA_ADMIN_TOKEN 优先，兜底组织者专用文件。
+
+    刻意**不从 ai-arena.json 读** —— 那个文件与参赛 AI 同机、可读，
+    而 admin 的 `view=all` 是组织者特权（见 docs/CONDITIONS.md 事故记录第 6 条）。
+    服务器侧也做了同样的限制：配置里的 admin token 一律被忽略，读不到环境变量
+    就不注册 admin agent（fail-closed）。
+    """
+    import os
+    import pathlib
+
+    tok = (os.environ.get("ARENA_ADMIN_TOKEN") or "").strip()
+    if len(tok) >= 16:
+        return tok
+    # 兜底：组织者专用文件 server-run/admin-token.txt（由 start-arena.ps1 生成）
+    p = pathlib.Path(cfg_path).resolve().parent.parent / "admin-token.txt"
+    if p.is_file():
+        tok = p.read_text(encoding="utf-8-sig").strip()
+        if len(tok) >= 16:
+            return tok
+    raise RuntimeError(
+        "没有裁判凭据：先设 ARENA_ADMIN_TOKEN，或跑一次 start-arena.ps1 生成 admin-token.txt"
+    )
+
+
+def load_own_token(agent_id, cfg_path=r"C:\dsh\ai-arena\server-run\config\ai-arena.json"):
+    """只取自己那一个 agent 的 token —— 参赛客户端用这个。
+
+    为什么单独开一个函数：配置文件里同时存着其他 agent 与 **admin** 的 token，
+    而 admin 的 `view=all` 是组织者特权（全图视野，对等约束明确禁止「看穿迷雾」）。
+    拿 admin token 看全图，性质与已被默认禁用的瞬移后门同级。
+    见 docs/CONDITIONS.md 事故记录第 6 条。
+    """
+    with open(cfg_path, encoding="utf-8-sig") as f:
+        cfg = json.load(f)
+    for a in cfg["agents"]:
+        if a["id"] == agent_id:
+            return a["token"]
+    raise KeyError(f"no agent named {agent_id!r} in {cfg_path}")
+
+
 def load_tokens(cfg_path=r"C:\dsh\ai-arena\server-run\config\ai-arena.json"):
-    """读 ai-arena.json，返回 {agent_id: token} 以及 admin token。"""
+    """读 ai-arena.json，返回 {agent_id: token} 以及配置里那条 admin token（**已失效**）。
+
+    ⚠ 第二个返回值拿不到可用的裁判凭据了：服务器侧的 admin 凭据只从环境变量
+    ARENA_ADMIN_TOKEN 读，配置文件里那条会被忽略。要裁判凭据用 `load_admin_token()`。
+    参赛客户端更不该用它 —— 只用 `load_own_token(agent_id)`。
+    """
     with open(cfg_path, encoding="utf-8-sig") as f:
         cfg = json.load(f)
     toks = {a["id"]: a["token"] for a in cfg["agents"]}
