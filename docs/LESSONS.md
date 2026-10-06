@@ -216,6 +216,30 @@ git 立刻警告 `CRLF will be replaced by LF` —— **PowerShell 的 `Add-Cont
 改完顺手查一次：`git ls-files --eol | Select-String 'w/crlf'`（输出应为空）。
 **`.ps1` 是唯一的例外**（`*.ps1 -text`，BOM 是文件内容的一部分，见 AGENTS.md 铁律 7）。
 
+### 2.10 `git commit -m` 里的 `\"` 会被 PowerShell 当成命令执行
+
+**踩过两次。** 提交信息里带 JSON 片段时（比如「响应体里有 `"suggestion": "shift the anchor"`」），
+写成 `-m "... \"suggestion\": \"...\""` 会这样炸：
+
+```
+fatal: Invalid path '/suggestion': No such file or directory
+shift : 无法将"shift"项识别为 cmdlet、函数、脚本文件或可运行程序的名称。
+```
+
+原因：**PowerShell 的转义符是反引号 `` ` ``，不是反斜杠** —— `\"` 在双引号字符串里
+不会转义引号，于是引号提前闭合，后面的内容被当成命令执行。
+而错误信息里还会混进 `git log` 的正常输出，**看起来像提交成功了**（第一次就是这么骗过去的）。
+
+**正确做法：长提交信息一律走文件。**
+
+```powershell
+[System.IO.File]::WriteAllText($p, $msg, (New-Object System.Text.UTF8Encoding($false)))
+git commit -F $p
+```
+
+用 `WriteAllText` 而不是 `Out-File`，是因为后者会写 **UTF-8 BOM**（接着就是 §2.9 那个坑）。
+**核对提交是否真的成功，看 `git log --oneline -1`，别从混排的输出里推断。**
+
 ---
 
 ## 三、工程与流程
