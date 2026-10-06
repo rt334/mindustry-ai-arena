@@ -207,7 +207,18 @@ $aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Enco
 `/referee/buildings?view=all` `/referee/units?view=all`
 `/referee/admin?action=observe&player=<id>`
 
-`/place` 的 `rot` 是方块朝向参数，取值 0–3。
+`/place` 的 `rot` 是方块朝向参数，取值 0–3，**语义是**：
+
+```
+0 = 东 (x+1)      1 = 南 (y+1)      2 = 西 (x-1)      3 = 北 (y-1)
+```
+
+**注意两件事，别按惯例推**：它是**顺时针**的，而且 **`0` 是东、不是北**。
+（屏幕坐标里 y 是向下增的，所以 `y+1` 是南。）
+「0 度朝上」是很普遍的先验，但**这个引擎不是那样**。
+
+**确认朝向永远别靠推**：放一格之后读 `/buildings` 的 `sendsTo` —— 它给的就是实际输出去向，
+拿它反推比任何记忆都准。**铺长走廊之前先把这条对一遍，铺完再对一遍。**
 **它的实际语义刻意不在这里说明** —— 到游戏里放一个、看它往哪边走即可确定。
 同理，各 `block` 名称、配方、地形含义都由 `/content` 与 `/map` 在运行时提供。
 
