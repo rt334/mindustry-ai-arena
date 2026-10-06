@@ -50,7 +50,25 @@ public final class StallWatch {
     /** 每个方块的异常类型，用于状态变化时重置计时。 */
     private static final Map<String, String> stalledKind = new HashMap<>();
 
+    /**
+     * 一条已达阈值的报警记录：`{Integer x, Integer y, Integer teamId, String json}`。
+     *
+     * 存**结构化字段 + 拼好的片段**，而不是只存一个拼好的大字符串 ——
+     * 因为同一份扫描结果要按**视角**过滤后分别输出（见 {@link #stallsJson(int)}）。
+     *
+     * 用 `Object[]` 而不是内部 `record`：后者会多生成一个 `StallWatch$Raw.class`，
+     * 让 jar 条目数从 50 变成 51 —— 而这个数正是用来**发现意外增删**的，
+     * 不该为了一个三字段容器就动它。
+     */
+    private static final int R_X = 0, R_Y = 1, R_TEAM = 2, R_JSON = 3;
+
     private static volatile String lastSnapshot = "[]";
+    /** 视角队伍 id -> 该视角可见的堵塞 JSON（含队伍过滤 + 迷雾过滤）。 */
+    private static volatile Map<Integer, String> byTeam = Map.of();
+    /** 视角队伍 id -> 该视角可见的条数。口径与 {@link #byTeam} 严格一致。 */
+    private static volatile Map<Integer, Integer> countByTeam = Map.of();
+    /** 全局条数（裁判视角）。 */
+    private static volatile int totalCount = 0;
 
     private StallWatch() {}
 
@@ -59,6 +77,9 @@ public final class StallWatch {
         stalledSince.clear();
         stalledKind.clear();
         lastSnapshot = "[]";
+        byTeam = Map.of();
+        countByTeam = Map.of();
+        totalCount = 0;
         planProgress.clear();
         planStuckSince.clear();
         planSample.clear();
@@ -215,15 +236,11 @@ public final class StallWatch {
             lastScanTick = tickNow;
 
             long now = System.currentTimeMillis();
-            StringBuilder snap = new StringBuilder("[");
-            boolean first = true;
-            // ⚠ 两个集合必须分开：
-            //   seen  本帧出现异常的方块（用于清理计时器）
-            //   alive 已达阈值的方块（用于输出）
-            // 早先把清理挂到 alive 上，导致「还没到 1 秒」的条目每帧都被删掉、
-            // 计时归零，永远涨不到阈值 —— 整个模块静默失效。
+            // ⚠ 清理必须挂在 seen 上，不能挂在「已达阈值」的集合上：
+            //   早先那么写导致「还没到 1 秒」的条目每帧都被删掉、计时归零，
+            //   永远涨不到阈值 —— 整个模块静默失效。
             java.util.HashSet<String> seen = new java.util.HashSet<>();
-            java.util.HashSet<String> alive = new java.util.HashSet<>();
+            java.util.List<Object[]> found = new java.util.ArrayList<>();
 
             for (var td : Vars.state.teams.present) {
                 Team team = td.team;
@@ -252,13 +269,9 @@ public final class StallWatch {
                     seen.add(key);
                     if (held < SUSTAIN_MS) continue;      // 不到 1 秒不算
 
-                    alive.add(key);
                     double secs = held / 1000.0;
-
-                    if (!first) snap.append(',');
-                    first = false;
-                    snap.append(entryJson(b, team, kind, secs));
-
+                    found.add(new Object[]{b.tileX(), b.tileY(), team.id,
+                        entryJson(b, team, kind, secs)});
                     Long last = lastReport.get(key);
                     if (last == null || now - last >= REPORT_INTERVAL_MS) {
                         lastReport.put(key, now);
@@ -273,10 +286,41 @@ public final class StallWatch {
                     }
                 }
             }
-            snap.append(']');
-            lastSnapshot = snap.toString();
+            totalCount = found.size();
 
-            // 清掉已经恢复的条目（用 seen，不是 alive）
+            StringBuilder all = new StringBuilder("[");
+            for (int i = 0; i < found.size(); i++) {
+                if (i > 0) all.append(',');
+                all.append((String) found.get(i)[R_JSON]);
+            }
+            lastSnapshot = all.append(']').toString();
+
+            // 按视角预生成。判据与 /buildings 完全一致（同队 + 当前可见），
+            // 理由见 API.md 的信息可见性契约：真人玩家在同队同位置能看到的，
+            // 才允许接口返回。
+            Map<Integer, String> bt = new HashMap<>();
+            Map<Integer, Integer> ct = new HashMap<>();
+            for (var vd : Vars.state.teams.present) {
+                Team vt = vd.team;
+                if (vt == null || vt == Team.derelict) continue;
+
+                StringBuilder sb = new StringBuilder("[");
+                int n = 0;
+                for (Object[] r : found) {
+                    if ((Integer) r[R_TEAM] != vt.id) continue;
+                    if (Vars.state.rules.fog
+                        && !Vars.fogControl.isVisibleTile(vt, (Integer) r[R_X], (Integer) r[R_Y])) continue;
+                    if (n > 0) sb.append(',');
+                    sb.append((String) r[R_JSON]);
+                    n++;
+                }
+                ct.put(vt.id, n);
+                bt.put(vt.id, sb.append(']').toString());
+            }
+            byTeam = bt;
+            countByTeam = ct;
+
+            // 清掉已经恢复的条目（用 seen，不是「已达阈值」集合 —— 见函数开头）
             stalledSince.keySet().removeIf(k -> !seen.contains(k));
             stalledKind.keySet().removeIf(k -> !seen.contains(k));
 
@@ -444,34 +488,37 @@ public final class StallWatch {
         return sb.append(']').toString();
     }
 
-    /** 当前所有异常方块。 */
-    public static String stallsJson() {
-        return lastSnapshot;
-    }
-
-    public static int stalledCount() {
-        return stalledSince.size();
+    /**
+     * 指定视角能看到的异常方块 JSON。
+     *
+     * @param viewId 视角队伍 id；`-1` 表示全见（裁判 / 观察者）
+     */
+    public static String stallsJson(int viewId) {
+        if (viewId < 0) return lastSnapshot;
+        return byTeam.getOrDefault(viewId, "[]");
     }
 
     /**
-     * **己方**当前处于异常状态的方块数 —— `/watch` 用（按队伍过滤）。
+     * 指定视角能看到的异常方块数。
      *
-     * `stalledCount()` 是全局的（它服务 `/stalls` 的裁判视角），而 AI 只看自己队的 ——
-     * 对等约束：信息不得超出同队玩家能看到的东西。
+     * **口径与 {@link #stallsJson(int)} 严格一致**：同队过滤 + 迷雾过滤。
+     * 早先这里是 `stalledSince.size()` —— 它会把**对手队伍**的产线故障
+     * 一并算进来，既漏了自己的、又多报了别人的（实测量到
+     * 「40 条里 39 条是对手的」）。
+     */
+    public static int stalledCount(int viewId) {
+        if (viewId < 0) return totalCount;
+        return countByTeam.getOrDefault(viewId, 0);
+    }
+
+    /**
+     * **己方**当前处于异常状态的方块数 —— `/watch` 用。
+     *
+     * 与 {@link #stalledCount(int)} 同源，所以 `/watch` 的 `noStall` 谓词
+     * 不会再被对手的堵塞卡住。
      */
     public static int stalledCountFor(Team team) {
-        int n = 0;
-        try {
-            for (String key : stalledSince.keySet()) {
-                int comma = key.indexOf(',');
-                if (comma <= 0) continue;
-                int x = Integer.parseInt(key.substring(0, comma));
-                int y = Integer.parseInt(key.substring(comma + 1));
-                var t = Vars.world.tile(x, y);
-                if (t != null && t.build != null && t.build.team == team) n++;
-            }
-        } catch (Throwable ignored) { }
-        return n;
+        return team == null ? 0 : stalledCount(team.id);
     }
 
     /**

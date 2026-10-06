@@ -10,6 +10,40 @@
 > [TODO.md](docs/TODO.md) 里「接口版本号没有约定」一条。
 
 
+## `/stalls` 现在按视角裁剪；人机对局有了 `-Darena.players` 白名单（2026-10-06）
+
+两处改动都由 2026-10-06 的人机对局暴露：前者的默认值在错的一侧，后者是缺一个人机对局的入口。
+
+### `GET /stalls` 只返回你看得见的那部分
+
+新增 `?view=own|<teamId>|all`（默认 `own`）。返回范围改成
+**自己队伍 + 当前视野内**，判据与 `/buildings` 逐字一致。
+
+改之前它返回全图所有队伍的表。那一局实测：AI 一次拿到 40 条，
+**39 条是对手的**，而它自己唯一的故障（石墨压缺煤，已饿 900 秒）淹没在里面。
+它读了 25 次告警，没有一次朝自己那条 15 格的煤线去 —— 缺的那截煤线是整局科技树
+唯一断点。详见 [CONDITIONS.md 明细 7](docs/CONDITIONS.md)。
+
+`data.stalledCount` 同步改成同口径；此前它是 `stalledSince.size()`，
+一个全局计数被当成「我的堵塞数」返回。
+
+裁判 / 观察者传 `view=all` 拿全图，规则与 `/buildings` 相同。
+
+### 新增 `-Darena.players=<名字,逗号分隔>`
+
+列在里面的玩家**不被** `autospectate` 接管，按正常玩家进场。给真人想同场对局时用：
+
+```
+java -Darena.players=rt -jar server-release.jar
+```
+
+**为什么不直接把 `autospectate` 默认翻成 `false`**：试过，翻回来过。
+`observer/` 那个观战端 mod **不在客户端报名** —— 它靠服务端把连接标成 spectator
+才切到全图视角（`ObserverMod` 里只有「检测到自己被标为 spectator」这一条路）。
+默认关掉它，观战端连上就不是观察者了。用一个坏默认换另一个坏默认，不划算。
+
+所以 `autospectate` 保持默认 `true`，「谁该当玩家」交给白名单回答。
+
 ## 权限分级与桥接端点（2026-10-06）
 
 ### agent 有了 `role`，不再只有 admin 一个布尔

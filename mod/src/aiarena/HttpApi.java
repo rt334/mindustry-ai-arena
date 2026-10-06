@@ -1031,21 +1031,28 @@ public final class HttpApi {
     }
 
     /**
-     * 传送带堵塞报警。
+     * 产线堵塞报警。
      *
-     *   GET /stalls            当前所有堵住的传送带
+     *   GET /stalls[?view=own|<teamId>|all]
      *
      * 判据是引擎自己的 clogHeat（涨到 1 约等于堵了 1 秒）。
      * 每条给出位置、朝向、压着的物品、堵了多久，以及**出料侧是什么方块、
      * 它是否接受物品** —— 后者才是定位堵塞原因的关键。
      *
+     * **返回范围按视角裁剪**，判据与 `/buildings` 完全一致（同队 + 当前可见）：
+     * 玩家能察觉「自己哪条线堵了」，察觉不到对手的产线状态。
+     * 早先这里直接返回全局表，AI 一次拿到 40 条、其中 39 条是**对手**的
+     * （实测于 2026-10-06 的人机对局），既越界又把它引向修不了的方块。
+     *
      * 堵塞同时也会进事件流（type=stall），所以可以 /events?since= 增量拉。
      */
     private static void handleStalls(HttpExchange ex, AIArena.Agent agent) {
+        int viewId = resolveView(agent, Params.of(ex));
         respond(ex, 200, Json.ok(new Json.Obj()
             .put("agent", agent.id)
-            .put("stalledCount", StallWatch.stalledCount())
-            .putRaw("stalls", StallWatch.stallsJson())
+            .put("team", viewId)
+            .put("stalledCount", StallWatch.stalledCount(viewId))
+            .putRaw("stalls", StallWatch.stallsJson(viewId))
             .toString()));
     }
 

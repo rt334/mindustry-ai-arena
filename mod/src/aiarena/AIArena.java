@@ -97,9 +97,37 @@ public final class AIArena {
     /** 观战者当前视角：uuid -> 队伍 id。-1 表示全图（裁判视角）。 */
     private static final java.util.Map<String, Integer> viewTeams = new java.util.concurrent.ConcurrentHashMap<>();
 
-    /** 是否自动把每个连入的玩家设为观战者。默认开，可用 -Darena.autospectate=false 关。 */
+    /**
+     * 是否自动把每个连入的玩家设为观战者。**默认开**，可用 `-Darena.autospectate=false` 关。
+     *
+     * ⚠ 不要把这个默认值翻成 `false`（2026-10-06 试过又翻回来了）：
+     * 观战端 mod（`observer/`）**不在客户端报名**，它靠服务端把连接标成 spectator
+     * 才会切到全图视角（`ObserverMod` 里只有「检测到自己被标为 spectator」这一条路）。
+     * 默认关掉 = 观战端连上后不是观察者，拿不到全图 —— 用一个坏默认换另一个坏默认。
+     *
+     * 真人想正常游玩时用 {@link #REAL_PLAYERS} 白名单，而不是关掉整个开关。
+     */
     public static final boolean AUTO_SPECTATE =
         !"false".equalsIgnoreCase(System.getProperty("arena.autospectate", "true"));
+
+    /**
+     * **不**被自动接管的玩家名，逗号分隔：`-Darena.players=rt,alice`。
+     *
+     * 为什么是白名单而不是「让真人自己关 autospectate」：那个开关是**整个服务器**的，
+     * 一关就同时废掉观战端（见上）。而人机对局想要的只是「这几个名字按玩家走，
+     * 其余连接照旧当观察者」。实测那一局是靠 `-Darena.autospectate=false` 才让真人
+     * 进得去的，代价是观战端也得另外处理 —— 白名单让这两件事不再互相牵制。
+     */
+    public static final java.util.Set<String> REAL_PLAYERS = parseRealPlayers();
+
+    private static java.util.Set<String> parseRealPlayers() {
+        java.util.Set<String> out = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        for (String n : System.getProperty("arena.players", "").split(",")) {
+            n = n.trim();
+            if (!n.isEmpty()) out.add(n);
+        }
+        return out;
+    }
 
     /** 新观战者的默认视角。-1 = 裁判全图；也可以设成某个队伍 id。 */
     public static final int DEFAULT_VIEW = Integer.getInteger("arena.defaultview", -1);

@@ -41,6 +41,12 @@ public class AIArenaMod extends Mod {
         if (AIArena.AUTO_SPECTATE) {
             arc.Events.on(mindustry.game.EventType.PlayerJoin.class, e -> {
                 if (e.player == null) return;
+                // 白名单里的名字按正常玩家走，不接管 —— 人机对局用这个入口。
+                if (AIArena.REAL_PLAYERS.contains(e.player.name)) {
+                    AIArena.log("player-join " + e.player.name
+                                + " -> kept as PLAYER (listed in -Darena.players)");
+                    return;
+                }
                 boolean ok = AIArena.makeObserver(e.player, AIArena.DEFAULT_VIEW);
                 AIArena.log("auto-spectate " + e.player.name
                             + " -> " + (ok ? "ok" : "FAILED")
