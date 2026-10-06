@@ -176,6 +176,14 @@ $aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Enco
 
 ## 4. 接口
 
+**更全的接口手册在同仓库的 `docs/API.md`** —— 那里有每个端点的**完整字段表、失败码含义、
+以及各种边界情况的说明**。这一节只列高频端点，遇到「这个字段到底什么意思」就去查它。
+
+> **失败时一定要读响应体，不要只看 HTTP 状态码。** 接口在失败时给的信息比成功时更具体：
+> 例如 `/place` 冲突时 `data.conflictAt` 给出**精确到哪一格**挡着，
+> `data.suggestion` 给出该怎么改。实测有人只看到 `HTTP 409 Conflict` 就去换位置重试，
+> 白烧两个回合；也有人铺一批只看了总数、没读 `skipped` 明细，把「跳过了 2 格」当成全部成功。
+
 统一前缀 `http://127.0.0.1:7199/v1/<agent>/<action>`。查询用 `GET`，操作用 `POST`。
 
 ### 查询
@@ -209,7 +217,7 @@ $aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Enco
 
 | 接口 | 参数 | 说明 |
 |---|---|---|
-| `/place` | `x y block [rot] [config] [unit]` | 下建造请求（排队，须轮询确认）；批量用 `shape=`：`line` `area` `rect` `outline` `circle` `point` `path`。**返回体带 `appliedRot` / `anchorX` / `anchorY` / `size`** —— 多格方块的 `anchorX/Y` 就是它在引擎里的左上角，**算边界直接读它，别自己推 `中心 ± size/2`** |
+| `/place` | `x y block [rot] [config] [unit]` | 下建造请求（排队，须轮询确认）；批量用 `shape=`：`line` `area` `rect` `outline` `circle` `point` `path`。**返回体带 `appliedRot` / `anchorX` / `anchorY` / `size`** —— 多格方块的 `anchorX/Y` 就是它在引擎里的左上角，**算边界直接读它，别自己推 `中心 ± size/2`**。失败时读 `data.conflictAt`（精确冲突格）与 `data.suggestion` |
 | `/break` | `x y` | 拆除 |
 | `/config` | `x y value=` | 设置方块配置 |
 | `/command` | `action=...` + `units=` | 指挥单位（8 种 action）：`move` `attackUnit` `assistBuilding` `setCommand` `setStance` `commandBuilding` `requestItem` `transferInventory` |
