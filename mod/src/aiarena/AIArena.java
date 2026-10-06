@@ -449,12 +449,34 @@ public final class AIArena {
                     if (id == null || id.isEmpty()) { log("skip agent without id"); continue; }
                     int team = a.getInt("team", -1);
                     if (team < 0 || team >= Team.all.length) { log("skip agent " + id + ": bad team " + team); continue; }
-                    String tok = a.getString("token", null);
-                    if (tok == null || tok.length() < 16) {
-                        log("skip agent " + id + ": token missing or too short");
-                        continue;
-                    }
                     boolean admin = a.getBool("admin", false);
+
+                    String tok;
+                    if (admin) {
+                        // admin 凭据**一律不从配置文件读**。
+                        //
+                        // 为什么：这个配置文件与参赛 AI 同机、可读，而 admin 的 view=all
+                        // 是组织者特权 —— 明文放在这里等于把裁判权限递给参赛者。
+                        // 见 docs/CONDITIONS.md 事故记录第 6 条。
+                        tok = System.getenv("ARENA_ADMIN_TOKEN");
+                        if (tok == null || tok.trim().length() < 16) {
+                            log("agent '" + id + "' 标了 admin，但没有可用的 admin 凭据 —— 已跳过。");
+                            log("   设置环境变量 ARENA_ADMIN_TOKEN（>=16 字符）后重启，裁判功能才会启用。");
+                            log("   这是刻意的 fail-closed：宁可没有 admin，也不把裁判权限留在可读文件里。");
+                            String plain = a.getString("token", null);
+                            if (plain != null && plain.length() >= 16) {
+                                log("   注：配置文件里那条明文 token 已被忽略，请不要再用它。");
+                            }
+                            continue;
+                        }
+                        tok = tok.trim();
+                    } else {
+                        tok = a.getString("token", null);
+                        if (tok == null || tok.length() < 16) {
+                            log("skip agent " + id + ": token missing or too short");
+                            continue;
+                        }
+                    }
                     agents.add(new Agent(id, team, tok.getBytes("UTF-8"), admin));
                 }
             }
@@ -482,12 +504,15 @@ public final class AIArena {
             + "  \"agents\": [\n"
             + "    { \"id\": \"alpha\", \"team\": 100, \"token\": \"" + token + "\", \"admin\": false },\n"
             + "    { \"id\": \"beta\",  \"team\": 101, \"token\": \"" + randomToken() + "\", \"admin\": false },\n"
-            + "    { \"id\": \"referee\", \"team\": 0, \"token\": \"" + randomToken() + "\", \"admin\": true }\n"
+            // admin 条目的 token 刻意留空：它的凭据只从环境变量 ARENA_ADMIN_TOKEN 读，
+            // 不写进这个文件 —— 文件与参赛 AI 同机可读，写进去等于把裁判权限递出去。
+            + "    { \"id\": \"referee\", \"team\": 0, \"token\": \"\", \"admin\": true }\n"
             + "  ]\n"
             + "}\n";
         try {
             file.writeString(cfg, false, "UTF-8");
             log("generated tokens for 3 agents (see " + file.absolutePath() + ")");
+            log("NOTE: 'referee' 是 admin，它的 token 留空 —— 请用环境变量 ARENA_ADMIN_TOKEN 提供它。");
         } catch (Throwable t) {
             log("failed to write default config: " + t);
         }

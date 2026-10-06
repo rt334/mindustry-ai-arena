@@ -454,6 +454,27 @@ public final class StallWatch {
     }
 
     /**
+     * **己方**当前处于异常状态的方块数 —— `/watch` 用（按队伍过滤）。
+     *
+     * `stalledCount()` 是全局的（它服务 `/stalls` 的裁判视角），而 AI 只看自己队的 ——
+     * 对等约束：信息不得超出同队玩家能看到的东西。
+     */
+    public static int stalledCountFor(Team team) {
+        int n = 0;
+        try {
+            for (String key : stalledSince.keySet()) {
+                int comma = key.indexOf(',');
+                if (comma <= 0) continue;
+                int x = Integer.parseInt(key.substring(0, comma));
+                int y = Integer.parseInt(key.substring(comma + 1));
+                var t = Vars.world.tile(x, y);
+                if (t != null && t.build != null && t.build.team == team) n++;
+            }
+        } catch (Throwable ignored) { }
+        return n;
+    }
+
+    /**
      * 停机的直接原因 —— 一句话说清该往上游查还是往下游查。
      *
      *   starved        上游没把料送来（缺输入），**往上游查**

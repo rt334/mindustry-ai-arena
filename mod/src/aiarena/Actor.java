@@ -216,7 +216,7 @@ public final class Actor {
 
         // 与其让每个 AI 自己推这个偏移，不如把它换回来的结果直接给出。
 
-        extra.put("appliedRot", rotation);
+        extra.put("appliedRot", ((rotation % 4) + 4) % 4);   // 归一化：引擎会环绕越界值（9→1、-1→3、4→0），原样回显会让「比对 rot 与 appliedRot」永远看不出差异
 
         extra.put("anchorX", x + (int) block.sizeOffset);
 

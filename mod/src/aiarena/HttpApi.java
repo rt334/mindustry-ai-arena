@@ -123,11 +123,15 @@ public final class HttpApi {
                 return;
             }
 
-            // 审计：谁、什么时候、要动哪一格。只记会改变世界的动作，
-            // 读接口不记 —— 否则被 /map 刷爆，真出事时反而查不出东西。
-            if (Audit.isMutating(action)) {
+            // 审计：谁、什么时候、要动哪一格；以及谁用了特权视野。
+            // 普通读接口不记 —— 否则被 /map 刷爆，真出事时反而查不出东西。
+            // 但带 view= 的请求必记：admin 的 view=all 是组织者特权，
+            // 参赛 agent 一旦拿到 admin token 也能用，不留痕就查不出越界。
+            String rawQuery = ex.getRequestURI().getRawQuery();
+            boolean privileged = Audit.isPrivileged(rawQuery);
+            if (Audit.isMutating(action) || privileged) {
                 Audit.log(agentId, agent.team() == null ? -1 : agent.team().id, action,
-                          ex.getRequestURI().getRawQuery(), ex.getRequestMethod());
+                          rawQuery, ex.getRequestMethod(), privileged);
             }
 
             // 限流在鉴权之后、路由之前：过不了鉴权的请求不该消耗配额。
@@ -162,6 +166,7 @@ public final class HttpApi {
                 case "database"  -> handleDatabase(ex, agent);
                 case "rates"     -> handleRates(ex, agent);
                 case "stalls"    -> handleStalls(ex, agent);
+                case "watch"     -> handleWatch(ex, agent);
                 case "ore"       -> handleOre(ex, agent);
                 case "chat"      -> handleChat(ex, agent);
                 case "queue"     -> handleQueue(ex, agent);
@@ -856,6 +861,26 @@ public final class HttpApi {
             .put("stalledCount", StallWatch.stalledCount())
             .putRaw("stalls", StallWatch.stallsJson())
             .toString()));
+    }
+
+    /**
+     * 「值得注意」的聚合判定 —— 给客户端一个「能睡 / 不能睡」的单一信号。
+     *
+     * 见 docs/TODO.md §九 #7 与 docs/PRIOR-ART.md §五：实时游戏里 AI 跟不上 tick，
+     * 正确形态是「有事才醒」。但光有「有事发生」不够 —— 客户端还需要**明确的
+     * 「现在没事」信号**，否则它不敢睡，只能继续轮询。
+     *
+     * 数据全部来自既有信号（停机 / 队列停滞 / 事件游标），**不新增游戏内情**：
+     * 每一项都能用 `/stalls`、`/queue`、`/events` 单独查到，这里只合成一个判断。
+     *
+     * 走主线程：要读 `Vars.world` 与 `StallWatch` 的非线程安全表。
+     */
+    private static void handleWatch(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+        long sinceSeq = p.getLong("since", 0L);
+        Team team = agent.team();
+        if (team == null) { respond(ex, 403, Json.error(1403, "agent has no team")); return; }
+        postToGame(ex, () -> Json.ok(Watch.evaluate(team, sinceSeq)));
     }
 
     // ================================================================ 核心数据库
