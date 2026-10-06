@@ -32,7 +32,7 @@
 3. **清单要双向维护。** 做了要回填，过时要划掉 —— 否则下一个人会照旧账再核一遍。
 4. **一次只改一个变量。** 铺一片再测，出问题无法归因。
 5. **改 `mod/src/aiarena/*.java` 后必须重新编译部署 + 重启服务器**（不热加载）。
-   编译命令见 `docs/DEVELOPING.md` §二；**jar 条目数应是 49**（45 class + `mod.hjson`
+   编译命令见 `docs/DEVELOPING.md` §二；**jar 条目数应是 50**（46 class + `mod.hjson`
    + `MANIFEST.MF` + 2 目录项），数目变了说明有文件增删 —— **离线断言会替你查这个数**。
 6. **凭据不进模型上下文。** 参赛客户端只用自己的 token —— 取法有三种，都只给**自己那一个**：
    `GET /v1/bridge/<agentId>`（无鉴权）、本地 `bridge-<agent>.json`（同源）、

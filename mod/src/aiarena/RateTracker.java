@@ -126,6 +126,45 @@ public final class RateTracker {
      * @param windowSeconds 窗口长度（秒）
      * @return JSON 字符串
      */
+    /**
+     * 某队某物品在窗口内的**每秒净变化**（核心库存口径）。
+     *
+     * 为什么单给一个方法、而不是让调用方去解析 `ratesJson` 的字符串：
+     * `/await` 的 `rate:` 谓词每次采样都要判一次，拼 JSON 再解析太浪费。
+     * 取值逻辑与 `ratesJson` 同源 —— 都是「窗口内最老与最新两个采样」的差。
+     *
+     * @return 每秒变化；队伍/物品无效或样本不足时返回 NaN
+     */
+    public static float perSecondOf(Team team, Item item, double windowSeconds) {
+        if (team == null || item == null || count == 0) return Float.NaN;
+        if (Vars.state == null) return Float.NaN;
+
+        long nowTick = (long) Vars.state.tick;
+        long fromTick = nowTick - (long) (windowSeconds * 60.0);
+
+        Sample newest = null, oldest = null;
+        for (int i = 0; i < count; i++) {
+            int idx = ((head - 1 - i) % CAPACITY + CAPACITY) % CAPACITY;
+            Sample s = ring[idx];
+            if (s == null) continue;
+            if (newest == null) newest = s;
+            if (s.tick >= fromTick) oldest = s;
+        }
+        if (newest == null) return Float.NaN;
+        if (oldest == null) oldest = newest;
+        if (newest == oldest) return Float.NaN;
+
+        int[] a = oldest.core.get(team.id);
+        int[] b = newest.core.get(team.id);
+        if (a == null || b == null) return Float.NaN;
+
+        int id = item.id;
+        if (id < 0 || id >= a.length || id >= b.length) return Float.NaN;
+
+        double seconds = Math.max(0.001, (newest.tick - oldest.tick) / 60.0);
+        return (float) ((b[id] - a[id]) / seconds);
+    }
+
     public static String ratesJson(Team team, double windowSeconds) {
         if (team == null || count == 0) {
             return "{\"error\":\"no samples yet\"}";

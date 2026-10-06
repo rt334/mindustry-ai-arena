@@ -9,7 +9,7 @@ description:
   本 skill 只讲**怎么调用接口**，不含任何游戏内容。
 metadata:
   author: Little Code Sauce
-  version: "1.5.2"
+  version: "1.6.0"
 ---
 
 # ai-arena Skill
@@ -66,6 +66,9 @@ for($i=0; $i -lt 120; $i++){
 
 `/place` 的排队语义的用途是：**别把「入队」当成「已建成」写进报告**，
 不是要求你守到它建成。
+
+**真的需要等一个状态时，用 `/await` 让服务端等** —— 别自己写轮询循环：
+轮询的每一次都是一趟模型往返。`/await?until=built:273,84&timeout=90` 一次调用就够。
 
 **为什么较真**：本项目的建造类是**排队**的 —— 接口返回成功只代表请求入队，
 不代表已经生效。固定等待会产出「看起来成功、其实没有」的假结论。
@@ -152,6 +155,7 @@ $aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Enco
 | `/rates` | `window` | 资源变化速率。**回看**最近 window 秒，立即返回 —— 验刚做的改动用 `3`，看稳定值用 `30` |
 | `/stalls` | — | 产线异常警报（堵塞、缺料、满仓） |
 | `/watch` | `since` | 「值得注意」的聚合判定：`clear` 为真表示现在没事，可以睡到下一次事件（配合 `/stream` 或 `/events` 的游标） |
+| `/await` | `until` `timeout` | **谓词等待**：让服务端替你等一个状态出现 —— `built:<x>,<y>` / `rate:<物品>:<n>` / `queueEmpty` / `noStall`。超时也返回 200，看 `satisfied` |
 | `/drill` | — | 己方矿机状态 |
 | `/factory` | — | 己方单位工厂状态 |
 | `/ore` | `x y` | 指定格子的地表信息 |

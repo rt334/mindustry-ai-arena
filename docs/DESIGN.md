@@ -721,7 +721,7 @@ public static Team get(int id){ return all[((byte)id) & 0xff]; }
 
 ### 6.1 HTTP 端点
 
-**共 37 个 HTTP 端点 = 35 个 `/v1/{agentId}/<action>` + 无鉴权的 `/ping` 与 `/v1/bridge/<agentId>`**
+**共 38 个 HTTP 端点 = 36 个 `/v1/{agentId}/<action>` + 无鉴权的 `/ping` 与 `/v1/bridge/<agentId>`**
 （另有独立的 WebSocket `/ws`，在 7200 端口，不计入）。
 逐条的参数与响应见 [`API.md`](API.md)；**唯一事实源是 `HttpApi.java` 的路由 `switch`**
 与 `start()` 里的 `createContext`，本清单按源码逐条核对过。
@@ -744,6 +744,7 @@ public static Team get(int id){ return all[((byte)id) & 0xff]; }
   /v1/{agentId}/rates?window=<秒>         核心与全队产率
   /v1/{agentId}/stalls                    产线异常警报
   /v1/{agentId}/watch                     值得注意的事的**聚合判定**（"能睡 / 不能睡"）
+  /v1/{agentId}/await                     **谓词等待原语**（让服务端替你把一个状态等出来，省掉客户端轮询的 LLM 往返）
   /v1/{agentId}/drill                     矿机明细
   /v1/{agentId}/factory                   单位工厂
   /v1/{agentId}/queue                     建造队列

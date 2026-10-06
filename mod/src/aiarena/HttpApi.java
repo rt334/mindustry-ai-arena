@@ -196,6 +196,7 @@ public final class HttpApi {
                 case "rates"     -> handleRates(ex, agent);
                 case "stalls"    -> handleStalls(ex, agent);
                 case "watch"     -> handleWatch(ex, agent);
+                case "await"     -> handleAwait(ex, agent);
                 case "ore"       -> handleOre(ex, agent);
                 case "chat"      -> handleChat(ex, agent);
                 case "queue"     -> handleQueue(ex, agent);
@@ -890,6 +891,172 @@ public final class HttpApi {
             .put("stalledCount", StallWatch.stalledCount())
             .putRaw("stalls", StallWatch.stallsJson())
             .toString()));
+    }
+
+    // ================================================================ 谓词等待
+
+    /** 同时挂起的 `/await` 上限 —— 每个都在 HTTP 线程上循环，太多会占满线程池。 */
+    private static final int MAX_LIVE_AWAITS = 16;
+    private static final java.util.concurrent.atomic.AtomicInteger liveAwaits =
+        new java.util.concurrent.atomic.AtomicInteger();
+
+    /** 一个等待谓词。只在主线程求值，且**只看调用方自己队**。 */
+    private static final class WaitPred {
+        final String name;
+        final java.util.function.Predicate<Team> test;
+        WaitPred(String name, java.util.function.Predicate<Team> test) {
+            this.name = name;
+            this.test = test;
+        }
+    }
+
+    /** 己方所有单位手上的建造计划总数。 */
+    private static int planCountOf(Team team) {
+        int n = 0;
+        for (mindustry.gen.Unit u : mindustry.gen.Groups.unit) {
+            if (u == null || u.team != team || u.plans == null) continue;
+            for (mindustry.entities.units.BuildPlan p : u.plans) {
+                if (p != null) n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * 在主线程上求值一次。读操作，**不占写预算**。
+     *
+     * 与 `postToGame` 的区别：那个是「写 + 自己负责 respond」，这个是「读 + 把结果拿回来」。
+     */
+    private static boolean evalOnGame(java.util.function.BooleanSupplier task, long timeoutMs) {
+        CompletableFuture<Boolean> f = new CompletableFuture<>();
+        Core.app.post(() -> {
+            try { f.complete(task.getAsBoolean()); }
+            catch (Throwable t) { f.complete(Boolean.FALSE); }
+        });
+        try {
+            Boolean b = f.get(timeoutMs, TimeUnit.MILLISECONDS);
+            return b != null && b;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 解析 `until=` 谓词。**返回 null 表示不合法**（调用方回 400 并列出支持的形式）。
+     *
+     * 支持的谓词刻意只有四个，且**全部以调用方自己队为观察对象**：
+     *
+     *   built:&lt;x&gt;,&lt;y&gt;        该格已建成**己方**建筑
+     *   rate:&lt;物品&gt;:&lt;n&gt;      己方核心该物品净产率 ≥ n（10 秒窗口）
+     *   queueEmpty           己方建造队列为空
+     *   noStall              己方没有处于异常状态的方块
+     *
+     * 不做「指定其它队」的变体 —— 那等于用服务端算力换情报，越过对等约束
+     * （见 docs/TODO.md §十 10.4）。
+     */
+    private static WaitPred parseAwait(String until) {
+        if (until == null) return null;
+        String u = until.trim();
+
+        if (u.equals("queueEmpty")) {
+            return new WaitPred("queueEmpty", team -> planCountOf(team) == 0);
+        }
+        if (u.equals("noStall")) {
+            return new WaitPred("noStall", team -> StallWatch.stalledCountFor(team) == 0);
+        }
+        if (u.startsWith("built:")) {
+            String[] xy = u.substring(6).split(",");
+            if (xy.length != 2) return null;
+            final int bx, by;
+            try {
+                bx = Integer.parseInt(xy[0].trim());
+                by = Integer.parseInt(xy[1].trim());
+            } catch (NumberFormatException e) { return null; }
+            return new WaitPred("built:" + bx + "," + by, team -> {
+                var t = Vars.world.tile(bx, by);
+                return t != null && t.build != null && t.build.team == team;
+            });
+        }
+        if (u.startsWith("rate:")) {
+            // 语法刻意用冒号分隔：`rate:<物品>:<n>`（意为 ≥ n）。
+            //
+            // **不用 `>=`**：`>` 在 URL 里是非法字符，请求会在**到达服务端之前**
+            // 就被 HTTP 层拒掉（实测 `rate:copper>=5` → `400 Bad request URI`），
+            // 而那看起来像端点报错，很容易被误判成接口坏了。
+            String[] parts = u.split(":");
+            if (parts.length != 3) return null;
+            String itemName = parts[1].trim();
+            float need;
+            try { need = Float.parseFloat(parts[2].trim()); }
+            catch (NumberFormatException e) { return null; }
+            mindustry.type.Item it = Vars.content.item(itemName);
+            if (it == null) return null;
+            return new WaitPred("rate:" + itemName + ">=" + need,
+                team -> RateTracker.perSecondOf(team, it, 10.0) >= need);
+        }
+        return null;
+    }
+
+    /**
+     * 谓词等待原语：`GET /v1/{agent}/await?until=&lt;谓词&gt;&timeout=&lt;秒&gt;`
+     *
+     * **为什么要有它**（docs/TODO.md §十 10.3）：必须等一个状态出现时，
+     * 现在只能客户端轮询 —— 而**每次轮询都是一趟 LLM 往返**，
+     * 等一次建造可能烧掉几十轮模型调用。让服务端判，把「轮询 30 次」压成「一次调用」。
+     *
+     * **超时不是错误**：HTTP 仍返回 200，由 `satisfied` 区分 ——
+     * 调用方据此决定重试还是改计划。
+     */
+    private static void handleAwait(HttpExchange ex, AIArena.Agent agent) {
+        Params p = Params.of(ex);
+        String until = p.get("until", null);
+        double seconds = Math.max(0.5, Math.min(p.getFloat("timeout", 90f), 600f));
+
+        Team team = agent.team();
+        if (team == null) { respond(ex, 403, Json.error(1403, "agent has no team")); return; }
+
+        WaitPred pred = parseAwait(until);
+        if (pred == null) {
+            respond(ex, 400, Json.error(1001,
+                "required: until=<谓词>; supported: built:<x>,<y> | rate:<item>:<n> "
+              + "(≥ n) | queueEmpty | noStall"));
+            return;
+        }
+
+        int live = liveAwaits.incrementAndGet();
+        if (live > MAX_LIVE_AWAITS) {
+            liveAwaits.decrementAndGet();
+            respond(ex, 503, Json.error(1007, "too many live awaits (" + MAX_LIVE_AWAITS
+                + " max); retry shortly"));
+            return;
+        }
+
+        long t0 = System.currentTimeMillis();
+        long deadline = t0 + (long) (seconds * 1000.0);
+        try {
+            boolean ok = false;
+            while (System.currentTimeMillis() < deadline) {
+                if (evalOnGame(() -> pred.test.test(team), 2000L)) { ok = true; break; }
+                Thread.sleep(100);          // 采样间隔，不是「等待」
+            }
+            double waited = (System.currentTimeMillis() - t0) / 1000.0;
+            long tick = -1;
+            try { tick = (long) Vars.state.tick; } catch (Throwable ignored) { }
+
+            respond(ex, 200, Json.ok(new Json.Obj()
+                .put("satisfied", ok)
+                .put("until", pred.name)
+                .put("waitedSeconds", (float) Math.round(waited * 100) / 100f)
+                .put("tick", tick)
+                .put("hint", ok
+                    ? "条件已满足 —— 可以继续下一步"
+                    : "超时，条件仍未满足 —— 别重复同一个等待，先查为什么没到")
+                .toString()));
+        } catch (Throwable t) {
+            respond(ex, 500, Json.error(1500, String.valueOf(t)));
+        } finally {
+            liveAwaits.decrementAndGet();
+        }
     }
 
     /**
