@@ -2085,11 +2085,61 @@ public final class HttpApi {
                 .put("powerProduction", (b instanceof mindustry.world.blocks.power.PowerGenerator pg2) ? pg2.powerProduction : 0f)
                 .put("powerUse", blockPowerUse(b))
                 .put("drillSpeed", blockDrillSpeed(b))
+                // 范围类参数。description 只会说「连接范围更大」「定期修复附近的建筑」——
+                // 而「更大是多大」「附近是几格」是布局的硬约束，只在字段里能给。
+                //
+                // ⚠ 单位照抄引擎 tooltip，因为**两类不一样**：
+                //   PowerNode  `stats.add(Stat.powerRange, laserRange, StatUnit.blocks)`
+                //              ⇒ laserRange 本来就是**格**
+                //   projector  `stats.add(Stat.range, range / tilesize, StatUnit.blocks)`
+                //              ⇒ range 是**像素**，要除以 tilesize
+                // 把它们当同一种单位读，就会得到一个差 8 倍的数。
+                .putRaw("area", areaJson(b))
                 .putRaw("requirements", req.toString())
                 .putRaw("inputs", ins.toString())
                 .putRaw("outputs", outs.toString())
                 .toString());
         });
+    }
+
+    /**
+     * 范围类参数 —— 「它能作用到多远」。
+     *
+     * 这些数字**只在源码里有**：`description` 用的是相对说法（「连接范围更大的高级电力节点」
+     * 「定期修复附近的建筑」），而布局需要的恰恰是绝对值。实测 2026-10-06：
+     * 一个 agent 想扩电力网，`/block?name=power-node` 给不出连接距离，它只能靠试错。
+     *
+     * **单位按引擎 tooltip 逐个对齐**（这是唯一不会错的做法）：
+     *   `PowerNode`        → `Stat.powerRange, laserRange, StatUnit.blocks` ⇒ 格
+     *   `MendProjector`    → `Stat.range, range / tilesize, StatUnit.blocks` ⇒ 像素÷8
+     *   `OverdriveProjector` → 同上
+     *
+     * @return 形如 `{"connectRange":6,"maxConnections":3}` 的 JSON；无范围概念时给 `{}`
+     */
+    private static String areaJson(Block b) {
+        Json.Obj o = new Json.Obj();
+        boolean any = false;
+        try {
+            if (b instanceof mindustry.world.blocks.power.PowerNode pn) {
+                o.put("connectRange", pn.laserRange);      // 格
+                o.put("maxConnections", pn.maxNodes);
+                o.put("unit", "blocks");
+                any = true;
+            } else if (b instanceof mindustry.world.blocks.defense.MendProjector mp) {
+                o.put("range", mp.range / Vars.tilesize);  // 像素 → 格
+                o.put("unit", "blocks");
+                any = true;
+            } else if (b instanceof mindustry.world.blocks.defense.OverdriveProjector op) {
+                o.put("range", op.range / Vars.tilesize);
+                o.put("unit", "blocks");
+                any = true;
+            }
+            // 炮塔的射程不在这里给：`Turret.range` 的语义是「打多远」，
+            // 属于战斗参数，与「布局能铺多远」不是一回事。
+        } catch (Throwable t) {
+            return "{}";
+        }
+        return any ? o.toString() : "{}";
     }
 
     /**

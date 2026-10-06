@@ -10,6 +10,35 @@
 > [TODO.md](docs/TODO.md) 里「接口版本号没有约定」一条。
 
 
+## `/block` 新增 `area`：范围类参数（2026-10-06）
+
+「它能作用到多远」以前**只在源码里**。`description` 用的是相对说法 ——
+`power-node-large` 是「连接范围**更大**的高级电力节点」、`surge-tower` 是
+「用于**远距离**连接，但连接数**较少**」—— 而布局需要的恰恰是绝对值。
+实测一个 agent 想扩电力网时，`/block?name=power-node` 给不出连接距离，它只能靠试错。
+
+```json
+"area": {"connectRange": 6.0, "maxConnections": 10, "unit": "blocks"}
+```
+
+| 方块 | `area` |
+|---|---|
+| `power-node` | 6 格 / 10 个连接 |
+| `power-node-large` | 15 / 15 |
+| `surge-tower` | 40 / 2 |
+| `mender` | 5 格 |
+| `mend-projector` | 10.63 格 |
+| `overdrive-projector` / `overdrive-dome` | 10 / 25 格 |
+
+没有范围概念的方块（`conveyor` / `battery` / `silicon-smelter` …）给 `{}`。
+
+**单位逐个对齐引擎 tooltip，因为两类不一样**：`PowerNode` 用
+`Stat.powerRange, laserRange, StatUnit.blocks`（**本来就是格**），
+projector 用 `Stat.range, range / tilesize, StatUnit.blocks`（**像素，要除以 8**）。
+当同一种单位读，`mender` 的 5 格会变成 40 格。
+
+尚未覆盖：`force-projector` / `radar`（它们的半径不在已判断的几类里）。
+
 ## `/block` 补齐「转运件」语义；`/diag` 暴露加入策略（2026-10-06）
 
 ### 转运件以前在 `/block` 里什么都不做

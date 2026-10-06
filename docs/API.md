@@ -848,6 +848,12 @@ progress=0.99  rate=0.70  eta=0
 | `powerUse` | 耗电（顶层） | `powerProduction` **只覆盖发电方块**；耗电方块以前顶层什么都不给，会让人把要 0.5 电的硅冶炼厂读成「不用电」 |
 | `inputs[].optional` | `true` = **有它更快、没它也能干** | 引擎自己就把「可选加成」和「必需输入」分开了（`ConsumeLiquidBase.booster`）。四台钻机全都列着 `water` 且**看着像非接不可**，而实测不接水也 `eff=1.0` —— 看 `optional` 就不会误判 |
 | `outputs[]` 的 `kind` | `item` / `liquid` / `power` / `ore` / `unit` / `transport` | **产出不来自配方的方块也在里面**：泵类（`water-extractor` 等）给 `kind=liquid` + `perSecond` + `baseEfficiency` + `attribute`，钻机给 `kind=ore` + `tier`，**转运件给 `kind=transport` + `how` + `note`**。这三类别以前都是空数组 |
+| `area` | **它能作用到多远**，单位一律 `blocks`（格） | `description` 只用相对说法——「连接范围**更大**的高级电力节点」「用于**远距离**连接，但连接数**较少**」——而布局需要的恰恰是**绝对值**。实测：`power-node` = 6 格 / 10 个连接，`power-node-large` = 15 / 15，`surge-tower` = 40 / 2，`mend-projector` = 10.63 格。没有范围概念的方块给 `{}` |
+
+> **`area` 的单位是逐个对齐引擎 tooltip 的，因为两类不一样**——这正是那种「看着对其实差 8 倍」的坑：
+> `PowerNode` 用 `Stat.powerRange, laserRange, StatUnit.blocks`（**本来就是格**），
+> 而 projector 用 `Stat.range, range / tilesize, StatUnit.blocks`（**像素，要除以 8**）。
+> 把它们当同一种单位读，`mender` 的「5 格」就会变成「40 格」。
 
 **转运件的 `transport` 条目说的是「它怎么送」** —— 这是它们唯一的语义，而配方视角下它们一片空白：
 
