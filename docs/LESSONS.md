@@ -196,6 +196,26 @@ public boolean acceptItem(Building source, Item item){
    转述会把它从「某人说的」悄悄升级成「我知道的」，而那个升级是假的。
 3. 这条与 §2.6「先怀疑推理」是一对：**那条讲别人会错，这条讲自己会替别人错。**
 
+### 2.9 别用 `Add-Content` 改仓库里的文件（它写 CRLF）
+
+2026-10-06：我用 `Add-Content CHANGELOG.md -Encoding UTF8` 追加一段，
+git 立刻警告 `CRLF will be replaced by LF` —— **PowerShell 的 `Add-Content` 写的是 CRLF**，
+而本仓库 `.gitattributes` 声明 `* text=auto eol=lf`。
+
+**这个警告不能忽略**：按行匹配的锚点脚本有 101 个，
+**行尾漂移会让它们静默失效**（不是报错，是"按 `^\s*xxx` 找不到那一行了"，
+看上去像功能坏了，其实是行尾变了）。这也是 AGENTS.md 专门有一节讲行尾的原因。
+
+**改仓库文件一律用 `edit` / `write` 工具**（它们写 LF）。
+确要脚本手写就用：
+
+```powershell
+[System.IO.File]::WriteAllText($p, $text, (New-Object System.Text.UTF8Encoding($false)))
+```
+
+改完顺手查一次：`git ls-files --eol | Select-String 'w/crlf'`（输出应为空）。
+**`.ps1` 是唯一的例外**（`*.ps1 -text`，BOM 是文件内容的一部分，见 AGENTS.md 铁律 7）。
+
 ---
 
 ## 三、工程与流程
