@@ -847,7 +847,27 @@ progress=0.99  rate=0.70  eta=0
 | `drillSpeed` | 钻机在**满矿**（footprint 全是矿）时的理论速率，单位 **items/s** | 四台钻机的其余顶层字段**完全一样**，唯一区别是 `outputs[].tier` —— 而 **tier 只表示「能挖多硬的矿」，不表示快慢**。想横向比速度只有看这一栏（取法与引擎 tooltip 的 `Stat.drillSpeed` 同源：`60/drillTime × size²`）。实际速率还要乘矿种硬度带来的折扣，具体能挖多少看 `/ore` 与 `/drill` |
 | `powerUse` | 耗电（顶层） | `powerProduction` **只覆盖发电方块**；耗电方块以前顶层什么都不给，会让人把要 0.5 电的硅冶炼厂读成「不用电」 |
 | `inputs[].optional` | `true` = **有它更快、没它也能干** | 引擎自己就把「可选加成」和「必需输入」分开了（`ConsumeLiquidBase.booster`）。四台钻机全都列着 `water` 且**看着像非接不可**，而实测不接水也 `eff=1.0` —— 看 `optional` 就不会误判 |
-| `outputs[]` 的 `kind` | `item` / `liquid` / `power` / `ore` / `unit` | **产出不来自配方的方块也在里面**：泵类（`water-extractor` 等）给 `kind=liquid` + `perSecond` + `baseEfficiency` + `attribute`，钻机给 `kind=ore` + `tier`。这两类别以前是空数组 |
+| `outputs[]` 的 `kind` | `item` / `liquid` / `power` / `ore` / `unit` / `transport` | **产出不来自配方的方块也在里面**：泵类（`water-extractor` 等）给 `kind=liquid` + `perSecond` + `baseEfficiency` + `attribute`，钻机给 `kind=ore` + `tier`，**转运件给 `kind=transport` + `how` + `note`**。这三类别以前都是空数组 |
+
+**转运件的 `transport` 条目说的是「它怎么送」** —— 这是它们唯一的语义，而配方视角下它们一片空白：
+
+| `how` | 规则 |
+|---|---|
+| `conveyor` / `armored-conveyor` / `duct` / `conduit` | 沿朝向逐格推进；**只从背面收料，侧向不接**（`armored-*` 是连侧向输入都不收的加固版） |
+| `stack-conveyor` | 沿朝向推进，一次搬运一整叠 |
+| `junction` / `duct-junction` / `liquid-junction` | **交叉不打结**：各方向的货各自直行穿过、互不混流 |
+| `router` / `duct-router` / `liquid-router` | **在所有可收的邻格之间轮流发** —— 这就是「一路分多路」 |
+| `sorter` / `inverted-sorter` | 按**配置的那个物品**过滤：匹配的走朝向，不匹配的走背面 |
+| `overflow-gate` / `underflow-gate` / `overflow-duct` | 两个候选出口，按对方当前 `acceptItem` **实时**判断：优先一侧，它不收就溢到另一侧 |
+| `bridge` / `buffered-bridge` / `duct-bridge` / `direction-bridge` / `liquid-bridge` | 跨格送到配对的另一端 |
+| `mass-driver` | 把货物抛射到配对的接收端 |
+| `unloader` / `directional-unloader` | 从相邻容器或核心取货送出 —— **核心是终点，得有它才能把库存取出来** |
+
+> 为什么补这一段：`kind` 是 `transport` 的这批方块，`inputs` 与 `outputs` **曾经都是空数组**。
+> AI 据此得到的结论是「这一类方块什么都不做」—— 它整局没建过任何分流件，
+> 223 条传送带的 `sendsTo` 长度全部为 1（只有链、没有扇出），
+> 于是「一路料分给八台设备」这种做法在它那边**根本没有名字**。
+> 这是同一类缺口的第四次（泵类、液体、矿脉各一次）：**它每次都去问了，每次都得到「那个东西没用」。**
 
 **泵类的 `baseEfficiency` / `attribute` 是回答「它非要建在水源上吗」的两个字段**：产能 = `baseEfficiency + 脚下的 attribute 值`，而 `attribute` 只是**加成**项。只看 `attribute=water` 会得出「没水就不能用」——那是错的。
 

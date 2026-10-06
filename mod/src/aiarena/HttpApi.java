@@ -1614,6 +1614,85 @@ public final class HttpApi {
         return "unknown";
     }
 
+    /**
+     * 转运件的「怎么送」。
+     *
+     * 配方视角下这类方块一片空白（`inputs` 与 `outputs` 都是空的）——
+     * 而「怎么送」恰恰是它们唯一的语义。缺了这一段，`/block` 对它们的回答
+     * 就是「什么都不做」，于是「分叉、合流、溢流」这整类做法在 AI 那边
+     * 根本没有名字。
+     *
+     * 这里给的**全是规则**（引擎怎么转发、优先级由哪个字段决定），
+     * 不涉及「该怎么排」——那是布局设计，按 §7.9 的边界不给。
+     *
+     * @return 完整的 outputs 条目 JSON；不是转运件返回 null
+     */
+    private static String transportJson(Block b) {
+        String how = null, note = null;
+
+        // ⚠ 顺序有讲究：子类必须排在父类前面
+        if (b instanceof mindustry.world.blocks.distribution.StackConveyor) {
+            how = "stack-conveyor"; note = "沿朝向推进，一次搬运一整叠";
+        } else if (b instanceof mindustry.world.blocks.distribution.ArmoredConveyor) {
+            how = "armored-conveyor"; note = "同传送带，但不接受侧向输入";
+        } else if (b instanceof mindustry.world.blocks.distribution.Conveyor) {
+            how = "conveyor"; note = "沿朝向逐格推进；只从背面收料，侧向不接";
+        } else if (b instanceof mindustry.world.blocks.distribution.StackRouter) {
+            how = "stack-router"; note = "在所有可收的邻格之间轮流发，整堆为单位";
+        } else if (b instanceof mindustry.world.blocks.distribution.DuctRouter) {
+            how = "duct-router"; note = "在所有可收的邻格之间轮流发";
+        } else if (b instanceof mindustry.world.blocks.distribution.Sorter s) {
+            // `how` 用 invert 分开 —— 否则 sorter 与 inverted-sorter 在 `/block` 里
+            // 长得完全一样，而它们的转发方向正好相反。
+            how = s.invert ? "inverted-sorter" : "sorter";
+            note = "按**配置的那个物品**过滤：匹配的走朝向，不匹配的走背面";
+        } else if (b instanceof mindustry.world.blocks.distribution.Router) {
+            how = "router"; note = "在所有可收的邻格之间轮流发 —— 这就是「一路分多路」";
+        } else if (b instanceof mindustry.world.blocks.distribution.OverflowGate g) {
+            how = g.invert ? "underflow-gate" : "overflow-gate";
+            note = "两个候选出口，按对方当前 `acceptItem` 实时判断：优先一侧，"
+                 + "它不收就溢到另一侧";
+        } else if (b instanceof mindustry.world.blocks.liquid.LiquidJunction) {
+            how = "liquid-junction";
+            note = "液体版交叉：各方向的液体各自直行穿过、互不混流";
+        } else if (b instanceof mindustry.world.blocks.liquid.LiquidRouter) {
+            how = "liquid-router"; note = "液体版分流：在所有可收的邻格之间轮流发";
+        } else if (b instanceof mindustry.world.blocks.liquid.ArmoredConduit) {
+            how = "armored-conduit"; note = "同液体管道，但不接受侧向输入";
+        } else if (b instanceof mindustry.world.blocks.liquid.Conduit) {
+            how = "conduit"; note = "沿朝向输送液体；只从背面收，侧向不接";
+        } else if (b instanceof mindustry.world.blocks.distribution.OverflowDuct) {
+            how = "overflow-duct"; note = "同溢流门：优先一侧，满则溢到另一侧";
+        } else if (b instanceof mindustry.world.blocks.distribution.DuctJunction) {
+            how = "duct-junction"; note = "交叉不打结：各方向的货各自直行穿过";
+        } else if (b instanceof mindustry.world.blocks.distribution.Junction) {
+            how = "junction";
+            note = "交叉不打结：每个方向的货各自直行穿过、互不混流"
+                 + "（两条带子十字相交而不互相灌料就靠它）";
+        } else if (b instanceof mindustry.world.blocks.distribution.BufferedItemBridge) {
+            how = "buffered-bridge"; note = "跨格送到配对的另一端，中间带缓冲";
+        } else if (b instanceof mindustry.world.blocks.distribution.ItemBridge) {
+            how = "bridge"; note = "跨格送到配对的另一端（同朝向的两端自动配对）";
+        } else if (b instanceof mindustry.world.blocks.distribution.DirectionLiquidBridge) {
+            how = "liquid-bridge"; note = "跨格输送液体到配对端";
+        } else if (b instanceof mindustry.world.blocks.distribution.DuctBridge) {
+            how = "duct-bridge"; note = "跨格送到配对端";
+        } else if (b instanceof mindustry.world.blocks.distribution.DirectionBridge) {
+            how = "direction-bridge"; note = "跨格送到配对端（按方向配对）";
+        } else if (b instanceof mindustry.world.blocks.distribution.MassDriver) {
+            how = "mass-driver"; note = "把货物抛射到配对的接收端，两端要连线";
+        } else if (b instanceof mindustry.world.blocks.distribution.Duct) {
+            how = "duct"; note = "沿朝向单格输送";
+        } else if (b instanceof mindustry.world.blocks.distribution.DirectionalUnloader) {
+            how = "directional-unloader"; note = "按朝向从相邻的容器或核心定向取货送出";
+        } else if (b instanceof mindustry.world.blocks.storage.Unloader) {
+            how = "unloader";
+            note = "从相邻的容器或核心取货送出 —— **核心是终点，得有它才能把库存取出来**";
+        }
+        if (how == null) return null;
+        return new Json.Obj().put("kind", "transport").put("how", how).put("note", note).toString();
+    }
+
     /** 这个方块是否产出该物品。 */
     private static boolean blockProducesItem(Block b, mindustry.type.Item it) {        if (b instanceof mindustry.world.blocks.production.GenericCrafter gc) {
             if (gc.outputItem != null && gc.outputItem.item == it) return true;
@@ -1960,6 +2039,20 @@ public final class HttpApi {
                 outs.append(new Json.Obj().put("kind", "liquid")
                     .put("perSecond", 60f * pump.pumpAmount * b.size * b.size)
                     .put("note", "抽出所在地表格里的液体，需建在液体上").toString());
+            }
+            // 转运件：它们的「产出」就是把收到的原样送出去，配方视角下一片空白 ——
+            // 而「怎么送」恰恰是它们唯一的语义。实测后果（2026-10-06 人机对战）：
+            // `/block?name=overflow-gate` 的 inputs 与 outputs **都是空数组**，
+            // AI 据此认为这一类方块什么都不做，于是整局没建过任何分流件 ——
+            // 它 223 条传送带的 `sendsTo` 长度全部为 1（只有链、没有扇出）。
+            //
+            // 这是同一类缺口的第四次：泵类（outputs 空）、液体（/database 404）、
+            // 矿脉（/ore 只列固体）。**每一次 AI 都去问了，每一次都得到「那个东西没用」。**
+            String transport = transportJson(b);
+            if (transport != null) {
+                if (!outf) outs.append(',');
+                outf = false;
+                outs.append(transport);
             }
             if (b instanceof mindustry.world.blocks.production.Drill dr) {
                 if (!outf) outs.append(',');
@@ -2888,6 +2981,15 @@ public final class HttpApi {
                     .put("buildSpeedMultiplier", r.buildSpeedMultiplier)
                     .toString())
                 .putRaw("fogState", fogStateJson())
+                // 加入策略。`autospectate` 会把每个连入的玩家接管成观察者，
+                // 而 `arena.players` 是它的白名单 —— 两者共同决定「谁进来是玩家、谁是观众」。
+                // 不暴露就只能靠读启动参数或猜；实测有人在服务器已经是观战模式的情况下
+                // 反复重连客户端、以为是客户端的问题。
+                .putRaw("joinPolicy", new Json.Obj()
+                    .put("autoSpectate", AIArena.AUTO_SPECTATE)
+                    .put("defaultView", AIArena.DEFAULT_VIEW)
+                    .putRaw("realPlayers", realPlayersJson())
+                    .toString())
                 // 各端点被调用了多少次（键是 agentId:action）。
                 // 回答「AI 有没有读 /stalls / /watch / /rates」这类问题 ——
                 // 审计日志只记改状态的操作，看不了这个。
@@ -2899,6 +3001,19 @@ public final class HttpApi {
                 .toString());
         });
     }
+
+    /** `-Darena.players` 白名单，序列化成 JSON 数组（给 `/diag` 的 `joinPolicy`）。 */
+    private static String realPlayersJson() {
+        StringBuilder sb = new StringBuilder("[");
+        boolean first = true;
+        for (String n : AIArena.REAL_PLAYERS) {
+            if (!first) sb.append(',');
+            first = false;
+            sb.append(Json.str(n));
+        }
+        return sb.append(']').toString();
+    }
+
     /**
      * 各端点的调用计数，按次数从多到少。
      *
@@ -5050,9 +5165,25 @@ public final class HttpApi {
         CompletableFuture<String> future = new CompletableFuture<>();
 
         Core.app.post(() -> {
-            long nowTick;
-            try { nowTick = Vars.state == null ? -1L : (long) Vars.state.tick; }
-            catch (Throwable t) { nowTick = -1; }
+            boolean inGame = false;
+            long nowTick = -1L;
+            try {
+                inGame = Vars.state != null && Vars.state.isGame();
+                nowTick = inGame ? (long) Vars.state.tick : -1L;
+            } catch (Throwable t) { inGame = false; nowTick = -1L; }
+
+            // ⚠ 没在游戏中就没有「每 tick」可言：`Vars.state.tick` 在菜单状态下
+            // **恒为 0**，于是 `nowTick != budgetTick` 永远为假 —— 预算再也不重置，
+            // 用尽一次之后**所有**走主线程的端点都永久返回 1007（HTTP 504），
+            // 而不走主线程的 `/ping`、`/state` 依然正常，看起来像「接口坏了一半」。
+            // 实测 2026-10-06：服务器起好但尚未开局时，调几十次 `/diag` 之后
+            // 每次都回 504（本应是「还没开局」，状态码却报超时）。
+            // 预算的目的是「别让写操作拖慢游戏 tick」——没有游戏在跑时它没有对象。
+            if (!inGame) {
+                try { future.complete(task.run()); }
+                catch (Throwable t) { future.complete(Json.error(1500, String.valueOf(t))); }
+                return;
+            }
 
             if (nowTick != budgetTick) {          // 新 tick 清零
                 budgetTick = nowTick;
