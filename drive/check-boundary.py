@@ -54,7 +54,7 @@ RULES: list[tuple[str, re.Pattern, str]] = [
     # 而列了裸词就会变成「一写接口说明就被判违规」。
     # 2026-10-06 在这里连错两次：先是 `dominantItem`/`hardness` 被「引擎内幕」规则误报，
     # 后来 `itemCapacity` 又在**这一条**里裸着 —— 它是 `/buildings` 的返回字段。
-    ("方块参数", re.compile(r"\btier\s*[=:]\s*\d|itemCapacity\s*[=:]\s*\d|hardness\s*[=:]\s*\d"),
+    ("方块参数", re.compile(r"\btier\s*[=:]\s*\d+|itemCapacity\s*[=:]\s*\d+|hardness\s*[=:]\s*\d+"),
      "方块的性能参数**值**要 AI 自己在游戏里试出来（字段名本身不违规）"),
     ("布局结论", re.compile(r"(放在|贴着|挨着|尽量靠)[^。\n]{0,12}(核心|干线|矿区)"),
      "「该放在哪」是结论，不是规则 —— 按对等约束的红线不给"),
@@ -119,6 +119,13 @@ def selftest() -> int:
 
 
 def scan_file(path: Path) -> tuple[list[str], list[str]]:
+    """扫一个文件。
+
+    ⚠ **每条规则在一行内只报第一个匹配**（用的是 `pat.search` 而不是 `finditer`）。
+    这是刻意省事，但会让「一行里写了好几处违规」看起来像漏报 ——
+    2026-10-06 我就因此怀疑规则坏了，其实把三处拆成三行就都报出来了。
+    **核对规则是否有效时，一处一行。**
+    """
     bad: list[str] = []
     hints: list[str] = []
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
