@@ -2133,7 +2133,12 @@ public final class HttpApi {
      *   `MendProjector`    → `Stat.range, range / tilesize, StatUnit.blocks` ⇒ 像素÷8
      *   `OverdriveProjector` → 同上
      *
-     * @return 形如 `{"connectRange":6,"maxConnections":3}` 的 JSON；无范围概念时给 `{}`
+     * @return 形如 `{"connectRange":<格>,"maxConnections":<n>,"unit":"blocks"}` 的 JSON；
+     *         无范围概念时给 `{}`。
+     *
+     *         这里刻意**不写死示例数值**：早先写的是 `"maxConnections":3`，
+     *         而 `PowerNode.maxNodes` 默认是 10，文档就在照着一个不存在的值教人读接口。
+     *         具体数值每个方块不同，只该由运行时给。
      */
     private static String areaJson(Block b) {
         Json.Obj o = new Json.Obj();
@@ -2156,6 +2161,11 @@ public final class HttpApi {
             // 炮塔的射程不在这里给：`Turret.range` 的语义是「打多远」，
             // 属于战斗参数，与「布局能铺多远」不是一回事。
         } catch (Throwable t) {
+            // 不能静默返回 `{}` —— 那和「这个方块本来就没有范围概念」同形，
+            // 调用方分不出「没有」和「读失败」，而两者的含义完全相反。
+            // 接口形状不变，但失败至少要留在服务器日志里，不能消失。
+            arc.util.Log.err("areaJson failed for "
+                + (b == null ? "null" : b.name) + ": " + t);
             return "{}";
         }
         return any ? o.toString() : "{}";
