@@ -25,6 +25,16 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# 同 offline-checks.py：Windows 中文控制台是 GBK，末尾那行「违规：0 … ✓」
+# 会在 print 时抛 UnicodeEncodeError —— 于是「0 违规」变成了退出码 1，
+# 看起来像边界检查失败。强制 UTF-8。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 TARGET = ROOT / "skill"
 DEFAULT_TARGET = TARGET
 

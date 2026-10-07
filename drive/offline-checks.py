@@ -27,6 +27,18 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+
+# Windows 中文控制台默认 GBK，脚本里的 ✓ 和中文会在 print 时抛 UnicodeEncodeError ——
+# 表现出来是「断言套件自己崩了」，而不是「哪一项没通过」，而且崩在最后一行，
+# 看起来像全过。实测过一次：71 项全过，第 72 项（死参数扫描）因为**子进程**的
+# 编码问题被判 FAIL —— 是假红，不是真缺陷。
+# 强制 UTF-8，别让控制台编码伪装成功能问题。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:      # 3.6 及更早没有 reconfigure；真崩了也无妨，继续跑
+        pass
+
 JAVAC = Path(r"C:\dsh\zulu17\zulu17.68.203-ca-jdk17.0.20.1-win_x64\bin\javac.exe")
 JAVA = Path(r"C:\dsh\zulu17\zulu17.68.203-ca-jdk17.0.20.1-win_x64\bin\java.exe")
 MIND_JAR = Path(r"C:\dsh\Mindustry-src\desktop\build\libs\Mindustry.jar")
@@ -112,6 +124,23 @@ def source_checks() -> None:
     api_md = (ROOT / "docs" / "API.md").read_text(encoding="utf-8")
     design = (ROOT / "docs" / "DESIGN.md").read_text(encoding="utf-8")
 
+    # --- StallWatch 的快照必须是单个引用 ---
+    #
+    # `/stalls` 的 stalledCount 和 stalls 必须来自同一拍扫描。早先它们各读一个
+    # volatile 字段（countByTeam / byTeam），两次读之间主线程完成一次 update()
+    # 就会返回「5 条计数、6 条数组」——接口自己和自己矛盾，而 AI 会信那个计数。
+    # 修法是合并成一个 volatile 快照 + 读侧一次取齐（viewOf）。
+    #
+    # 这条规则**在旧代码上是红的**（旧版有 4 个 volatile 字段），也就是它真会命中，
+    # 不是写来充数的。
+    stall = (ROOT / "mod" / "src" / "aiarena" / "StallWatch.java").read_text(encoding="utf-8")
+    eq("StallWatch 只保留一个 volatile 快照引用",
+       len(re.findall(r"private static volatile", stall)), 1)
+    rec("StallWatch 读侧一次取齐（viewOf）",
+        "PASS" if "public static Object[] viewOf(int viewId)" in stall else "FAIL",
+        "" if "public static Object[] viewOf(int viewId)" in stall
+        else "缺 viewOf —— /stalls 会退回各读一次快照，计数与数组可能不同源")
+
     # --- 端点数量与清单一致 ---
     actions = route_actions(http)
     eq(f"route 的 action 数量（应为 {EXPECTED_ACTIONS}）", len(actions), EXPECTED_ACTIONS)
@@ -189,8 +218,13 @@ def source_checks() -> None:
     if not dp.exists():
         rec("死参数扫描", "SKIP", "drive/check-dead-params.py 不存在")
     else:
-        r = subprocess.run([sys.executable, str(dp)], capture_output=True,
-                           text=True, errors="replace")
+        # 子进程必须显式带 -X utf8：父进程的 reconfigure 不会传下去，
+        # 而它自己的 print("… ✓") 在 GBK 控制台下会抛 UnicodeEncodeError，
+        # 退出码 1 → 这里判 FAIL。实测过：子进程单独跑报「死参数：0」，
+        # 被父进程调起来就报 FAIL —— 假红，不是真缺陷。
+        r = subprocess.run([sys.executable, "-X", "utf8", str(dp)],
+                           capture_output=True, text=True,
+                           encoding="utf-8", errors="replace")
         passed = r.returncode == 0
         detail = "" if passed else " | ".join(
             (r.stdout or r.stderr).strip().splitlines()[-3:])

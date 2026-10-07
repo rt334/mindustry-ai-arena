@@ -62,13 +62,23 @@ public final class StallWatch {
      */
     private static final int R_X = 0, R_Y = 1, R_TEAM = 2, R_JSON = 3;
 
-    private static volatile String lastSnapshot = "[]";
-    /** 视角队伍 id -> 该视角可见的堵塞 JSON（含队伍过滤 + 迷雾过滤）。 */
-    private static volatile Map<Integer, String> byTeam = Map.of();
-    /** 视角队伍 id -> 该视角可见的条数。口径与 {@link #byTeam} 严格一致。 */
-    private static volatile Map<Integer, Integer> countByTeam = Map.of();
-    /** 全局条数（裁判视角）。 */
-    private static volatile int totalCount = 0;
+    /**
+     * 一次扫描的**整体快照**：
+     * `{String 全量 JSON, Map 视角->JSON, Map 视角->条数, Integer 全局条数}`。
+     *
+     * ⚠ 必须是**单个** volatile 引用，不能拆成四个 volatile 字段。
+     *
+     * 拆开之后 `/stalls` 会返回自相矛盾的响应 —— 它先读计数、后读数组，
+     * 两次读之间主线程完成一次 `update()`，就拿到「计数来自上一拍、数组来自这一拍」。
+     * 裁判视角（`view=-1`）的窗口尤其宽：`totalCount` 的赋值和 `lastSnapshot`
+     * 的拼接之间隔着一整个字符串构造循环，是微秒级而不是纳秒级。
+     *
+     * 这与 `Snapshot.current` 是同一个范式：先在主线程把对象构造完整，再整体替换引用。
+     * 注意**光合并成一个引用还不够** —— 读侧也必须只读一次，见 {@link #viewOf(int)}。
+     */
+    private static volatile Object[] SNAP = {"[]", Map.of(), Map.of(), 0};
+    /** SNAP 的下标。 */
+    private static final int S_ALL = 0, S_BY_TEAM = 1, S_COUNT = 2, S_TOTAL = 3;
 
     private StallWatch() {}
 
@@ -76,10 +86,10 @@ public final class StallWatch {
         lastReport.clear();
         stalledSince.clear();
         stalledKind.clear();
-        lastSnapshot = "[]";
-        byTeam = Map.of();
-        countByTeam = Map.of();
-        totalCount = 0;
+        SNAP = new Object[]{"[]", Map.of(), Map.of(), 0};
+        // 扫描节流基准也要清：不清的话它仍指着上一张图的 tick，
+        // 换图后第一次扫描会被节流规则挡住
+        lastScanTick = -1;
         planProgress.clear();
         planStuckSince.clear();
         planSample.clear();
@@ -286,14 +296,11 @@ public final class StallWatch {
                     }
                 }
             }
-            totalCount = found.size();
-
             StringBuilder all = new StringBuilder("[");
             for (int i = 0; i < found.size(); i++) {
                 if (i > 0) all.append(',');
                 all.append((String) found.get(i)[R_JSON]);
             }
-            lastSnapshot = all.append(']').toString();
 
             // 按视角预生成。判据与 /buildings 完全一致（同队 + 当前可见），
             // 理由见 API.md 的信息可见性契约：真人玩家在同队同位置能看到的，
@@ -317,8 +324,8 @@ public final class StallWatch {
                 ct.put(vt.id, n);
                 bt.put(vt.id, sb.append(']').toString());
             }
-            byTeam = bt;
-            countByTeam = ct;
+            // 整体替换：读侧只会看到「上一拍全量」或「这一拍全量」，不会半新半旧
+            SNAP = new Object[]{all.append(']').toString(), bt, ct, found.size()};
 
             // 清掉已经恢复的条目（用 seen，不是「已达阈值」集合 —— 见函数开头）
             stalledSince.keySet().removeIf(k -> !seen.contains(k));
@@ -489,13 +496,34 @@ public final class StallWatch {
     }
 
     /**
+     * 一次读出某视角的（条数, JSON），**保证两者来自同一份快照**。
+     *
+     * `/stalls` 必须用这个，不能分别调 `stalledCount` + `stallsJson` ——
+     * 那两个方法各自读一次 `SNAP`，中间仍可能被主线程替换掉，
+     * 于是 `stalledCount` 和 `stalls` 的长度对不上。
+     *
+     * @return `{Integer count, String json}`
+     */
+    public static Object[] viewOf(int viewId) {
+        Object[] s = SNAP;
+        if (viewId < 0) return new Object[]{s[S_TOTAL], s[S_ALL]};
+        Object n = ((Map<?, ?>) s[S_COUNT]).get(viewId);
+        Object j = ((Map<?, ?>) s[S_BY_TEAM]).get(viewId);
+        return new Object[]{
+            n instanceof Integer i ? i : 0,
+            j instanceof String str ? str : "[]"};
+    }
+
+    /**
      * 指定视角能看到的异常方块 JSON。
      *
      * @param viewId 视角队伍 id；`-1` 表示全见（裁判 / 观察者）
      */
     public static String stallsJson(int viewId) {
-        if (viewId < 0) return lastSnapshot;
-        return byTeam.getOrDefault(viewId, "[]");
+        Object[] s = SNAP;
+        if (viewId < 0) return (String) s[S_ALL];
+        Object v = ((Map<?, ?>) s[S_BY_TEAM]).get(viewId);
+        return v instanceof String str ? str : "[]";
     }
 
     /**
@@ -507,8 +535,10 @@ public final class StallWatch {
      * 「40 条里 39 条是对手的」）。
      */
     public static int stalledCount(int viewId) {
-        if (viewId < 0) return totalCount;
-        return countByTeam.getOrDefault(viewId, 0);
+        Object[] s = SNAP;
+        if (viewId < 0) return (Integer) s[S_TOTAL];
+        Object v = ((Map<?, ?>) s[S_COUNT]).get(viewId);
+        return v instanceof Integer i ? i : 0;
     }
 
     /**

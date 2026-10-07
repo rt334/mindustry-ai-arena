@@ -1048,11 +1048,14 @@ public final class HttpApi {
      */
     private static void handleStalls(HttpExchange ex, AIArena.Agent agent) {
         int viewId = resolveView(agent, Params.of(ex));
+        // 计数与数组必须来自**同一拍**扫描，否则会返回「5 条计数、6 条数组」
+        // 这种自相矛盾的响应（见 StallWatch#viewOf）
+        Object[] v = StallWatch.viewOf(viewId);
         respond(ex, 200, Json.ok(new Json.Obj()
             .put("agent", agent.id)
             .put("team", viewId)
-            .put("stalledCount", StallWatch.stalledCount(viewId))
-            .putRaw("stalls", StallWatch.stallsJson(viewId))
+            .put("stalledCount", (Integer) v[0])
+            .putRaw("stalls", (String) v[1])
             .toString()));
     }
 
@@ -4027,9 +4030,13 @@ public final class HttpApi {
                 Vars.state.set(mindustry.core.GameState.State.menu);
             }
 
-            // 影子 Player 与情报状态都属于上一局，一并清空
+            // 影子 Player、情报状态、产线报警都属于上一局，一并清空。
+            //
+            // StallWatch 的报警表按 `"x,y"` 坐标字符串索引，跨图复用同一格坐标
+            // 会沿用上一张图的计时 —— 表现出来是换图后第一拍就报「已堵 300 秒」。
             Shadow.clear();
             Intel.clearAll();
+            StallWatch.clear();
 
             // 清理所有队伍的残留数据。
             //

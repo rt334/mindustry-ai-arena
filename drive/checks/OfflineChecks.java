@@ -2,6 +2,7 @@ import aiarena.AIArena;
 import aiarena.Audit;
 import aiarena.Json;
 import aiarena.Operations;
+import aiarena.StallWatch;
 
 import java.lang.reflect.Method;
 import java.util.ArrayList;
@@ -170,6 +171,35 @@ public class OfflineChecks {
             } catch (ReflectiveOperationException e) {
                 throw new RuntimeException(e);      // 由 group() 记成 SKIP
             }
+        });
+
+        // ------------------------------------------------ StallWatch 快照一致性
+        //
+        // 动机：`/stalls` 曾经分别调 `stalledCount(viewId)` + `stallsJson(viewId)`，
+        // 而这两个方法各自读一次快照引用 —— 两次读之间主线程可能已完成一次
+        // update()，于是响应里「计数来自上一拍、数组来自这一拍」，自己和自己
+        // 对不上（裁判视角的窗口尤其宽：totalCount 的赋值与 JSON 拼接之间隔着
+        // 一整个字符串构造循环）。现在两个值走同一次 `viewOf(viewId)`。
+        //
+        // 用 group 包住：StallWatch 是游戏内类，万一静态初始化在无 Vars 的
+        // 裸 JVM 里出问题，应该记 SKIP，而不是让整套 72 项断言一起崩。
+        group("StallWatch 快照", () -> {
+            for (int view : new int[]{-1, 0, 1}) {
+                Object[] v = StallWatch.viewOf(view);
+                eq("viewOf(" + view + ") 返回 [count, json]", v.length, 2);
+                ok("viewOf(" + view + ")[0] 是 Integer", v[0] instanceof Integer,
+                   "actual=" + v[0]);
+                ok("viewOf(" + view + ")[1] 是 String", v[1] instanceof String,
+                   "actual=" + v[1]);
+                // 单独读的两条路径，答案必须和同源读一致
+                eq("stalledCount(" + view + ") 与 viewOf 一致",
+                   StallWatch.stalledCount(view), v[0]);
+                eq("stallsJson(" + view + ") 与 viewOf 一致",
+                   StallWatch.stallsJson(view), v[1]);
+            }
+            // 未开局时快照是空表，也不该抛
+            eq("未开局 stalledCount(-1)", StallWatch.stalledCount(-1), 0);
+            eq("未开局 stallsJson(-1)", StallWatch.stallsJson(-1), "[]");
         });
 
         for (String line : out) System.out.println(line);
