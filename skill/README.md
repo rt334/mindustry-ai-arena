@@ -1,4 +1,4 @@
-﻿# ai-arena Skill
+# ai-arena Skill
 
 Mindustry AI 竞技场的**接口说明书**。只说怎么调用接口，不含任何游戏内容。
 
@@ -16,7 +16,7 @@ Mindustry AI 竞技场的**接口说明书**。只说怎么调用接口，不含
 等于让它在开局前就拿到答案。
 
 需要的东西去游戏里查：`/content` 给方块与物品表，`/map` 给地形，
-`/place` 的 `rot` 语义放一个方块看着走一遍就知道了。
+`/place` 的 `rot` 取值与语义见 `SKILL.md`。
 
 引擎与接口实现层的说明在仓库的 `docs/ENGINE-NOTES.md`（维护者文档，非 agent 读物）。
 

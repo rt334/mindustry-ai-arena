@@ -170,7 +170,10 @@ $aa = ((Get-Content 'C:\dsh\ai-arena\server-run\config\ai-arena.json' -Raw -Enco
 
 自己的 `role` 可以从 `/observe` 查（返回 `role` / `canSeeAll` / `isReferee`）。
 **参赛者通常是 `player`** —— 那意味着 `view=all` 拿不到全图，只能看自己队伍的视野。
-这不代表裁判能看到游戏内情：`view=all` 看到的仍然只是当前局面的正常视野范围，不是元数据。
+这不代表裁判能看到游戏内情：`view=all` 放大的**只是视野** —— 它让你看见全图的
+地形与地表，但不给你任何别的东西。配方、方块参数这类信息对所有角色是同一份，
+都在 `/content` `/block` `/database` 里，和视野无关。
+**视野变大本身就是那种特权**，所以它才属于组织者 —— 见上面那段。
 
 ---
 
