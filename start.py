@@ -73,7 +73,13 @@ def check(verbose=True):
 
     if CONFIG.exists():
         try:
-            cfg = json.loads(CONFIG.read_text(encoding="utf-8"))
+            # ⚠ 必须用 utf-8-sig：这个文件由 PowerShell 侧生成，而 `Set-Content -Encoding UTF8`
+            # 会带 BOM（`start-arena.ps1:183` 的注释专门提醒过，它自己用 WriteAllText 写无 BOM，
+            # 但只要有任何一环用了 Set-Content，BOM 就会回来）。实测 2026-10-06 13:10 那份带 BOM，
+            # 于是 `python start.py check` 一直报「agent 配置解析失败」并**挡住起局** ——
+            # 起局本身走 PowerShell（`Get-Content -Encoding UTF8` 容忍 BOM）所以从没暴露。
+            # utf-8-sig 在读无 BOM 文件时与 utf-8 等价，用它是纯保险。
+            cfg = json.loads(CONFIG.read_text(encoding="utf-8-sig"))
             ags = cfg.get("agents") or []
             lines.append(ok(f"agent 配置  {len(ags)} 个: "
                             + ", ".join(a.get("id", "?") for a in ags)))

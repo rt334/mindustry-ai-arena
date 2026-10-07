@@ -1069,6 +1069,7 @@ AI 在游戏里拿不到这些规则，只能靠散文式描述（`underflow-gat
 | `StallWatch.clear()` 是死代码，且不重置 `lastScanTick` | 报警表按 `"x,y"` 索引，换图复用同格坐标会沿用旧图计时（第一拍就报「已堵 300 秒」） | 在 `handleSetup` 的换图流程里调用 `clear()`（与 `Shadow.clear()`/`Intel.clearAll()` 并列），并重置节流基准 |
 | `areaJson` 的 `catch → "{}"` | 与「这个方块本来就没有范围概念」**同形**，调用方分不出「没有」和「读失败」，而两者含义相反 | 接口形状不变，失败写进服务器日志；顺带删掉 Javadoc 里写死的 `"maxConnections":3`（`PowerNode.maxNodes` 实际是 10）—— 文档不该照着不存在的值教人读接口 |
 | `offline-checks.py` 报「死参数扫描 FAIL」 | **假红**：子进程没带 `-X utf8`，GBK 控制台下 `print("✓")` 抛 `UnicodeEncodeError`、退出码 1，父脚本据此判 FAIL；父进程又用 GBK 解码子进程的 UTF-8 输出，连明细都是乱码。**单独跑那个子脚本，它自己报「死参数：0」** | 两个脚本开头把 stdout/stderr 钉成 UTF-8，子进程显式带 `-X utf8`，捕获输出显式给 `encoding` |
+| `start.py check` 报「agent 配置解析失败」并**挡住起局** | `server-run/config/ai-arena.json` 带 UTF-8 BOM，而 `start.py` 用 `read_text(encoding="utf-8")` 读它 —— `json` 模块不容忍 BOM。**起局本身走 PowerShell**（`Get-Content -Encoding UTF8` 容忍 BOM），所以这个坏只在 `start.py` 这条路上、一直没暴露 | 改用 `utf-8-sig`（读无 BOM 文件时与 `utf-8` 等价，纯保险）。**注意 BOM 的来源不止一处**：`start-arena.ps1:183` 那段「必须写无 BOM」只覆盖了 config，写给 `admin-token.txt` 的仍是会带 BOM 的 `Set-Content -Encoding UTF8` —— 两个文件实测都有 BOM |
 
 断言 **72 → 91 项**。新增的两条源码级规则**先验证过会命中**（临时把快照拆回两个 `volatile` → `FAIL actual=2 expect=1`），不是写来充数的绿。
 
@@ -1118,7 +1119,7 @@ AI 在游戏里拿不到这些规则，只能靠散文式描述（`underflow-gat
 
 | # | 问题 | 影响 |
 |---|---|---|
-| 1 | ~~「它读完告警之后做了什么」目前答不了~~ → **2026-10-07 两侧都解决了** | 服务端那两个源原本都不够（`Audit` 只记写、`CALLS` 无时间戳）。现在：**会话侧**读参赛 AI 自己的记录（reasoning / tool 调用 / 结果，见 `drive/agent-trail.py`，§14.7）；**服务端侧**给 `/diag` 加了 **`endpointLastCall`** —— 每个端点最后一次调用的时刻 + `agoSec`，与既有的 `endpointCalls` 配对就够还原时序。**两侧都要**：会话侧信息最全（含 reasoning）但文件可被参赛方删改，**仲裁只能凭服务端** |
+| 1 | ~~「它读完告警之后做了什么」目前答不了~~ → **2026-10-07 两侧都解决了** | 服务端那两个源原本都不够（`Audit` 只记写、`CALLS` 无时间戳）。现在：**会话侧**读参赛 AI 自己的记录（reasoning / tool 调用 / 结果，见 `drive/agent-trail.py`，§14.7）；**服务端侧**给 `/diag` 加了 **`endpointLastCall`** —— 每个端点最后一次调用的时刻 + `agoSec`，与既有的 `endpointCalls` 配对就够还原时序。**两侧都要**：会话侧信息最全（含 reasoning）但文件可被参赛方删改，**仲裁只能凭服务端**。服务端侧已实机验证：`python drive/verify-lastcall.py` → **24/24**，含两条反向验证（重调后 `agoSec` **变小**、不重调会**变大**）—— 只验「刚调过所以小」是不够的：一个「记第一次」的实现同样会小 |
 | 2 | **`51d6dac` 的 `/stalls` 视角裁剪从未被行为验证** | 「读了 25 次却在对手告警里找不到自己那条」是**修复前**的数据，修复后不可外推。C 不是待建，是**已做未验证** |
 | 3 | **样本不对称** | 人类那份布局是 n=1 且带 30+ 轮迭代与 5 次踩坑；AI 是 n=2、无方差、单指标。`LESSONS.md §1.5` 专门写过「别把维护者试了 30 轮和被试者第一次接触并列比」 |
 | 4 | **缺判别实验** | 顾问们都在推永久改动，没人提出一天可做的同局 A/B（同图同目标，一局给堵塞遥测、一局不给）。**先测量，再动接口** |
