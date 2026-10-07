@@ -1152,7 +1152,23 @@ python drive/agent-trail.py --id 9bb3f4ea --http       # 只看接口调用（�
 python drive/agent-trail.py --id 9bb3f4ea --files      # 只看文件访问 + **越界标记**
 python drive/agent-trail.py --id 9bb3f4ea --thinking   # 只看 reasoning
 python drive/agent-trail.py --id 9bb3f4ea --commands   # 命令行原文（正则抓不全时的兜底）
+python drive/agent-trail.py --id 9bb3f4ea --align      # **与服务端审计对齐**（见下）
 ```
+
+**`--align` 是两侧合起来才有用的那一半**：会话侧给「它调了什么、在想什么」，
+服务端侧（`server-run/ai-arena-audit.jsonl`，只记写操作）给「世界真的变了什么」。
+单看任何一侧都答不了「它在 T 读了告警，之后做了什么」：
+
+```
+[19:52:30.376] 会话     step  19 src   a.batch() ×1        ← 写了要下 batch
+[19:52:31.436] 会话     step  20 pwsh                      ← 跑了脚本
+[19:52:32.333] 服务端    写 batch ops=p,292,111,mechanical-drill,0;…   ← 世界真变了，差 2 秒
+```
+
+两侧时间**可直接比**（审计的 `t` 是 UTC ISO、会话的 `time` 是 epoch 毫秒，都是绝对时间，
+不必管本机时区）；窗口按会话全程自动裁（审计跨局累积，不限窗会被几天前的记录淹掉）；
+agent 名从会话里自动推断并**打印出来**让人能一眼否掉。
+**会话侧的读事件是下界** —— 调用写在自建脚本里时，会话侧只有 `src` 层看不到实际执行。
 
 **三层调用形态按证据强度分开报**，混在一起会把「打算调」当成「调了」：
 `exec` = 命令行里实际执行的 curl；`wrap` = 走 `arena.py` 封装；

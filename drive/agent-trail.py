@@ -35,16 +35,39 @@
     python drive/agent-trail.py --id 9bb3f4ea --thinking    只看 reasoning —— 它在想什么
     python drive/agent-trail.py --id 9bb3f4ea --json        机器可读（完整，不截断）
 
+    python drive/agent-trail.py --id 9bb3f4ea --align       与服务端审计对齐（见下）
+
     --full    不截断长字段（reasoning / 命令 / 结果默认各截到 400 字符）
+    --limit N --align 模式下最多显示多少条（默认 200）
+
+## `--align`：把两侧并成一条时间线
+
+会话侧有**它调了什么、在想什么**，服务端侧有**世界真的变了什么**（`server-run/ai-arena-audit.jsonl`，
+只记写操作）。两侧单独看都答不了「它在 T 读了告警，之后做了什么」—— 合起来才看得出时间差：
+
+    [19:52:30.376] 会话     step  19 src   a.batch() ×1        ← 写了要下 batch
+    [19:52:31.436] 会话     step  20 pwsh                      ← 跑了脚本
+    [19:52:32.333] 服务端    写 batch ops=p,292,111,mechanical-drill,0;…   ← 世界真变了，差 2 秒
+
+口径与两个必须知道的限制：
+
+  - **时间可直接比**：审计的 `t` 是 UTC ISO，会话的 `time` 是 epoch 毫秒 —— 都是绝对时间，
+    不必管本机时区。窗口按会话全程自动裁（审计是跨局累积的，不限窗会被几天前的记录淹掉）。
+  - **agent 名自动推断**（取会话里出现最多的 `/v1/<agent>/`），推断结果会打印出来，
+    用 `--agent` 可覆盖 —— **猜错比不猜更坏**，所以只认最高频那一个。
+  - **会话侧的读事件是下界**：参赛 AI 常把调用写进自建脚本，脚本**内部**的调用在会话侧
+    只有 `src` 层（「写了要调什么」）而看不到实际执行。服务端侧的写操作才是全量。
 
 退出码：0 正常；2 找不到会话；3 环境缺依赖（缺 `zstandard`）。
 """
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import re
 import sys
+import urllib.parse
 from pathlib import Path
 
 # Windows 中文控制台是 GBK，本脚本会打印 reasoning 原文（常含中文）——
@@ -58,13 +81,16 @@ for _s in (sys.stdout, sys.stderr):
 SESSIONS_ROOT = Path.home() / ".dsh" / "sessions"
 SESSION_FILE = "session.v4.jsonl.zstd"
 
+ROOT = Path(__file__).resolve().parent.parent
+AUDIT_PATH = ROOT / "server-run" / "ai-arena-audit.jsonl"
+
 # 那几轮对战的任务书里写死的硬性禁止：「不要读 docs/、drive/、mod/、_work/ 下的任何文件」。
 # 这几个目录装的是**实测出来的游戏内情**，读了等于开局前就拿答案。
 FORBIDDEN_DIRS = ("docs", "drive", "mod", "_work")
 # 允许区：参赛者自己的技能包与自建工作目录。
 ALLOWED_HINTS = ("skill", "work")
 
-HTTP_RE = re.compile(r"https?://127\.0\.0\.1:7199/v1/([A-Za-z0-9_\-]+)/([A-Za-z0-9_\-]+)(\?[^\"'\s|;)$]*)?")
+HTTP_RE = re.compile(r"https?://127\.0\.0\.1:7199/v1/([A-Za-z0-9_\-]+)/([A-Za-z0-9_\-]+)(\?[^\"'\s|;)$\\]*)?")
 # `curl.exe -X POST` / `-sS -XPOST` 都算；没显式给 -X 时 curl 默认 GET
 CURL_X_RE = re.compile(r"-X\s*([A-Z]+)")
 WINPATH_RE = re.compile(r"[A-Za-z]:\\\\?[\w.\\\-]+")
@@ -269,18 +295,29 @@ def is_forbidden(path: str) -> bool:
 
 
 def walk(recs: list[dict]):
-    """把记录流折成 [(step, reasoning[], calls[], results{callId: text})]。"""
+    """把记录流折成 `[(key, {time, reasoning[], text[], calls[], results{}})]`。
+
+    每个 step 会散成好几条记录（想的、调的、拿到的）—— `time` 取这批里**最早**那条，
+    即「它开始想这一步」的时刻。与服务端审计对齐时以它为锚点。
+    """
     steps: dict[tuple, dict] = {}
     order: list[tuple] = []
+
+    def bucket(key, r):
+        st = steps.setdefault(key, {"time": None, "reasoning": [], "text": [],
+                                    "calls": [], "results": {}})
+        if key not in order:
+            order.append(key)
+        if st["time"] is None and r.get("time"):
+            st["time"] = r["time"]
+        return st
+
     for r in recs:
         t = r.get("type")
         d = r.get("data") or {}
         if t == "assistant/message":
-            key = (d.get("turn"), d.get("step"))
+            st = bucket((d.get("turn"), d.get("step")), r)
             msg = (d.get("message") or {})
-            st = steps.setdefault(key, {"reasoning": [], "text": [], "calls": [], "results": {}})
-            if key not in order:
-                order.append(key)
             for b in msg.get("content") or []:
                 bt = b.get("type")
                 if bt == "reasoning" and (b.get("text") or "").strip():
@@ -291,17 +328,11 @@ def walk(recs: list[dict]):
                     st["calls"].append({"name": b.get("name"), "arguments": b.get("arguments"),
                                         "callId": b.get("id")})
         elif t == "tool/call":
-            key = (d.get("turn"), d.get("step"))
-            st = steps.setdefault(key, {"reasoning": [], "text": [], "calls": [], "results": {}})
-            if key not in order:
-                order.append(key)
+            st = bucket((d.get("turn"), d.get("step")), r)
             st["calls"].append({"name": d.get("name"), "arguments": d.get("arguments"),
                                 "callId": d.get("callId")})
         elif t == "tool/result":
-            key = (d.get("turn"), d.get("step"))
-            st = steps.setdefault(key, {"reasoning": [], "text": [], "calls": [], "results": {}})
-            if key not in order:
-                order.append(key)
+            st = bucket((d.get("turn"), d.get("step")), r)
             msg = d.get("message") or {}
             txt = "\n".join(b.get("text", "") for b in (msg.get("content") or [])
                             if b.get("type") == "text")
@@ -319,6 +350,116 @@ def walk(recs: list[dict]):
             uniq.append(c)
         st["calls"] = uniq
     return [(k, steps[k]) for k in order]
+
+
+# ------------------------------------------------------------------ 两侧对齐
+
+def load_server_audit(agent: str, t0: float, t1: float) -> list[dict]:
+    """读服务端审计，只留**该 agent** 的、落在 `[t0, t1]` 窗口内的行。
+
+    为什么必须按窗口过滤：审计是**跨所有局累积**的（实测 1.6 万行、跨两天），
+    不过滤的话一个 92 步的会话会被几天前的写操作淹掉。
+
+    时间口径：审计的 `t` 是 UTC ISO（`...Z`），会话的 `time` 是 epoch 毫秒 ——
+    两者都是**绝对时间**，直接比即可，不必管本机时区。
+
+    只收**写操作**：那个文件里只有两类东西 —— 改状态的动作，以及带 `privileged`
+    标记的特权读。后者用它自己的字段排掉。
+    """
+    rows: list[dict] = []
+    if not AUDIT_PATH.is_file():
+        return rows
+    with AUDIT_PATH.open(encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if o.get("agent") != agent or o.get("privileged"):
+                continue
+            try:
+                ts = datetime.datetime.fromisoformat(
+                    o["t"].replace("Z", "+00:00")).timestamp() * 1000.0
+            except (KeyError, ValueError, AttributeError):
+                continue
+            if t0 <= ts <= t1:
+                rows.append({"ms": ts, "action": o.get("action", "?"),
+                             "query": o.get("query", "") or "", "tick": o.get("tick")})
+    rows.sort(key=lambda r: r["ms"])
+    return rows
+
+
+def guess_agent(steps) -> str | None:
+    """从会话的工具调用里猜它是哪个参赛 agent（`/v1/<agent>/...` 里的那个）。
+
+    依据是**实际操作**而不是任何文档：会话里出现最多的 agent 名就是它。
+    只认最高频的那一个，而且调用方会把它打印出来让人能一眼否掉 ——
+    **猜错比不猜更坏**，所以这里不猜第二可能的、也不做模糊匹配。
+    """
+    counts: dict = {}
+    for _key, st in steps:
+        for call in st["calls"]:
+            for h in extract_http(call):
+                if h["agent"] not in ("-", ""):
+                    counts[h["agent"]] = counts.get(h["agent"], 0) + 1
+    if not counts:
+        return None
+    return max(counts.items(), key=lambda kv: kv[1])[0]
+
+
+def _hhmmss(ms: float, full: bool = False) -> str:
+    """毫秒 → 本地时间串。`full=True` 时带日期（对齐的标题用它，跨天不会混）。"""
+    fmt = "%Y-%m-%d %H:%M:%S" if full else "%H:%M:%S"
+    return datetime.datetime.fromtimestamp(ms / 1000).strftime(fmt + ".%f")[:-3]
+
+
+def align(steps, rows, args) -> None:
+    """把会话事件与服务端的写操作合成一条时间线。
+
+    **它回答单独任何一侧都答不了的问题**：「它在 T 读了告警，之后做了什么？」
+    会话侧有全部工具调用（含读接口），服务端侧有世界**真的变了**的那些动作。
+    两边一合，时间差就摆在那里了。
+
+    **一个必须明说的下界**：参赛 AI 常把接口调用写进自建脚本（实测那轮 40 次
+    `write` 全是 `from arena import Arena`），脚本内部的调用在会话侧只有 `src` 层
+    （「它写了要调什么」）而**看不到实际执行**。所以会话侧的读事件是**下界**；
+    服务端侧的写操作才是全量 —— 那正是它不可替代的地方。
+    """
+    events: list[tuple] = []
+    for (turn, step), st in steps:
+        t = st.get("time")
+        if not t:
+            continue
+        for c in st["calls"]:
+            https = extract_http(c)
+            for h in https:
+                # 与 render() 同一套拼法：`agent == "-"` 的是封装/脚本内置，
+                # 不是一条能点的 URL，别给它套 `/v1/` 前缀
+                if h["agent"] == "-":
+                    desc = f"{h['action']} {h['query']}".rstrip()
+                else:
+                    q = f"?{h['query']}" if h["query"] else ""
+                    desc = f"{h['agent']}/{h['action']}{q}"
+                events.append((t, "会话", f"step {step:>3} {h['via']:5s} {desc}"))
+            if not https:
+                events.append((t, "会话", f"step {step:>3} {c['name']}"))
+    for r in rows:
+        # 审计存的是原样 query（设计如此：按动作解析容易漏字段），
+        # 但 `batch` 的 ops 是整串 URL 编码的 —— 不解码根本读不了
+        q = urllib.parse.unquote(r["query"]) if r["query"] else ""
+        q = clip(q.replace("&", " "), 110)
+        events.append((r["ms"], "服务端", f"写 {r['action']} {q}".rstrip()))
+    events.sort(key=lambda e: e[0])
+
+    shown = events if args.full else events[:args.limit]
+    for ms, side, text in shown:
+        print(f"[{_hhmmss(ms)}] {side:6s} {text}")
+    if len(events) > len(shown):
+        print(f"  …（另有 {len(events) - len(shown)} 条未显示；--full 全看，"
+              f"--limit N 调条数）")
 
 
 # ------------------------------------------------------------------ 渲染
@@ -391,6 +532,11 @@ def main() -> int:
                     help="只列命令行原文 —— 正则抓不全所有调用形态时的兜底")
     ap.add_argument("--json", action="store_true", help="JSON 输出（完整，不截断）")
     ap.add_argument("--full", action="store_true", help="不截断长字段")
+    ap.add_argument("--align", action="store_true",
+                    help="与服务端审计对齐：把会话事件和服务端的**写操作**并成一条时间线")
+    ap.add_argument("--agent", help="服务端审计里的 agent 名（默认从会话里自动推断）")
+    ap.add_argument("--limit", type=int, default=200,
+                    help="--align 模式下最多显示多少条（默认 200；--full 取消限制）")
     args = ap.parse_args()
 
     load_zstd()
@@ -452,6 +598,28 @@ def main() -> int:
                       for k, st in steps],
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return 0
+
+    if args.align:
+        times = [st["time"] for _k, st in steps if st.get("time")]
+        if not times:
+            print("这个会话里没有带时刻的记录，无法对齐。", file=sys.stderr)
+            return 2
+        t0, t1 = min(times), max(times)
+        agent = args.agent or guess_agent(steps)
+        if not agent:
+            print("推断不出这是哪个 agent —— 用 --agent <名字> 指定。", file=sys.stderr)
+            return 2
+        rows = load_server_audit(agent, t0, t1)
+        print(f"# 会话 {target['id']}  「{target['label']}」")
+        print(f"# 服务端审计 {AUDIT_PATH}")
+        print(f"# agent = {agent}"
+              + ("" if args.agent else "（从会话里自动推断；用 --agent 可覆盖）"))
+        print(f"# 窗口 {_hhmmss(t0, full=True)} → {_hhmmss(t1, full=True)}（会话全程）")
+        if not AUDIT_PATH.is_file():
+            print("# ⚠ 审计文件不存在 —— 服务端那一侧会是空的")
+        print(f"# 窗口内服务端写操作 {len(rows)} 条\n")
+        align(steps, rows, args)
         return 0
 
     print(f"# 会话 {target['id']}  「{target['label']}」  {target['model']}"
