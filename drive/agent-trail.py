@@ -84,9 +84,18 @@ SESSION_FILE = "session.v4.jsonl.zstd"
 ROOT = Path(__file__).resolve().parent.parent
 AUDIT_PATH = ROOT / "server-run" / "ai-arena-audit.jsonl"
 
-# 那几轮对战的任务书里写死的硬性禁止：「不要读 docs/、drive/、mod/、_work/ 下的任何文件」。
-# 这几个目录装的是**实测出来的游戏内情**，读了等于开局前就拿答案。
+# 参赛 AI 不许读什么。**口径必须与 `PROMPTS.md` §一 第 5 条、`AGENTS.md` 一致** ——
+# 那两处 2026-10-07 统一过（此前它们互相打架：`AGENTS.md` 说参赛 AI 该读
+# `docs/API.md`，而任务书禁整个 `docs/`，见 TODO §14.7）。
+#
+#     docs/API.md        接口手册          -> **允许**
+#     docs/ 下的其余文件   实测出的游戏内情    -> 禁止
+#     drive/ mod/ _work/                   -> 禁止
+#
+# ⚠ 这个白名单**曾经不存在**，整个 `docs/` 都被判越界 —— 于是按当前规则合法读
+# `API.md` 的会话会被标红。**规则改了，检查器就得跟着改**：假警报会训练人忽略真警报。
 FORBIDDEN_DIRS = ("docs", "drive", "mod", "_work")
+ALLOWED_EXACT = ("docs/api.md",)
 # 允许区：参赛者自己的技能包与自建工作目录。
 ALLOWED_HINTS = ("skill", "work")
 
@@ -283,15 +292,19 @@ def extract_files(call: dict) -> list[str]:
 
 
 def is_forbidden(path: str) -> bool:
-    """路径是否落在那四个禁令目录里。按路径分段判，避免 'modules' 被 'mod' 误伤。"""
+    """路径是否落在禁令目录里。按路径分段判，避免 `modules` 被 `mod` 误伤。
+
+    `docs/API.md` 是**例外** —— 接口手册，参赛 AI 允许读（见文件头那条说明）。
+    """
     low = path.replace("\\", "/").lower()
     if "ai-arena" not in low:
         return False
-    parts = [p for p in low.split("/") if p]
-    for i, seg in enumerate(parts):
-        if seg == "ai-arena" and i + 1 < len(parts):
-            return parts[i + 1] in FORBIDDEN_DIRS
-    return False
+    idx = low.find("ai-arena/")
+    rel = low[idx + len("ai-arena/"):] if idx >= 0 else low
+    if rel in ALLOWED_EXACT:
+        return False
+    parts = [p for p in rel.split("/") if p]
+    return bool(parts) and parts[0] in FORBIDDEN_DIRS
 
 
 def walk(recs: list[dict]):
