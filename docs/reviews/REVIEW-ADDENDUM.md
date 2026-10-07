@@ -259,7 +259,14 @@ POST /control?op=order&unit=<id>&x=<格>&y=<格>
 其中 `dominantItems` = footprint 覆盖的**矿格数**（`Drill.java:277`），
 `getDrillTime = (drillTime + 50 × 硬度) / drillMultipliers`。
 
-煤 hardness = 2（`Items.java`），所以附加 100 帧。**本图无水，`speed = 1`：**
+煤 hardness = 2（`Items.java`），所以附加 100 帧。
+
+> ⚠ **更正（2026-10-06）**：下面原写「本图无水，`speed = 1`」—— **那个前提不成立。**
+> 水可以被生产：`water-extractor` 在**干地上**就能产水，用管道送进钻机即可让
+> `ConsumeLiquid.efficiency` 返回 1（它只看建筑**自身的液体库存**，不看环境），
+> 于是 `speed = lerp(1, 1.6, 1) = 1.6`。
+> **下表按裸速算，真实值应再乘 1.6。** 详见 [`../FEASIBILITY.md`](../FEASIBILITY.md) §二 的更正。
+> （本文保留原表不动 —— 它是当时的记录，改动会让评审轨迹失真。）
 
 | 矿机 | drillTime | 覆盖 | 每台 | **每矿格** |
 |---|---|---|---|---|
@@ -289,7 +296,9 @@ laserDrill:      consumeLiquid(Liquids.water, 0.08f).boost();
 「每格 0.214」（laser）是**漏掉了 `getDrillTime` 里的 `+50 × hardness` 项** ——
 本图煤 hardness = 2，应加 100 帧，正确值是 **0.120 / 0.158**。
 0.15 / 0.214 既不是无加成值也不是加成值，就是漏项，虚高 25% / 35%。
-（真有水才是 0.192 / 0.253，但本图无水。）
+（真有水才是 0.192 / 0.253 —— **而「水」这件事 2026-10-06 已更正：本图虽无天然液体地块，
+但可以造水，见本节开头的注记**。所以 0.192 / 0.253 才是可达值，`0.120 / 0.158` 是裸速。
+这一条不影响本节「漏了 hardness 项」的结论，只影响绝对数字。）
 **已在 `REPORT.md` 与 `DEBUG-LOG.md` 里改正**；修正后缺口更大，结论方向不变。
 
 ### 6.3 「5/s 不可达」这个结论：适用范围不同，两边其实不矛盾

@@ -81,8 +81,34 @@ getDrillTime = (drillTime + 50 × hardness) / drillMultipliers
 （`mechanical 0.05` / `pneumatic 3.5/60` / `laser 0.08`），`liquidBoostIntensity = 1.6`。
 早先这张表把 mechanical 标成「无」是错的，**但对下面的结论无影响**。
 
-**本图无水**（全图 70000 格只有 `darksand / shale / moss / spore-moss / core-zone`），
-故 `speed = 1`。上表按裸速算 —— **对结论无影响，余量本就有 5 倍。**
+**本图没有天然液体地块**（全图 70000 格只有 `darksand / shale / moss / spore-moss / core-zone`），
+但 **`speed = 1` 这个推论是错的** —— 见下面的更正。
+
+> ### ⚠ 更正（2026-10-06）：有 1.6 倍，而且拿得到
+>
+> **「图上没有水」≠「拿不到水」。** 水是**可以被生产**的：
+> `water-extractor`（抽水机）在**干地上**就能产水（`SolidPump.baseEfficiency = 1f`，
+> `canPump(tile) = !tile.floor().isLiquid` —— 它要的恰恰是「附近没有地表水」），
+> 实测 `perSecond 6.6`。
+>
+> 而钻机的水加成只认**自己建筑内的液体库存**：
+>
+> ```java
+> // ConsumeLiquid.efficiency(Building build)
+> return Math.min(build.liquids.get(liquid) / (amount * ed * multiplier.get(build)), 1f);
+> ```
+>
+> **它不检查环境、不检查脚下** —— 只要有人把水**送进这台钻机**（`conduit` 或液体桥），
+> `optionalEfficiency` 就是 1，于是
+> `speed = Mathf.lerp(1f, liquidBoostIntensity, 1f) = 1.6`。
+>
+> 所以正确结论是：**一条水线（1 台 `water-extractor` + `conduit`）能给钻机群吃到 1.6×，
+> 上表的裸速要乘 1.6**。这也解释了对局里为什么有人建抽水机 —— 不是为了找水，
+> 是**给钻机加水加成**。
+>
+> **尚未实测**（按 §五 第 23 条的纪律，这条是源码推导 + 机制自洽，仍需一局对照：
+> 「钻机 + 水线」vs「同位置裸钻机」的 `/buildings` `efficiency` 之比应为 1.6）。
+> **上表的绝对数字暂时保持裸速，别急着改数** —— 先补那个对照。
 
 ---
 
@@ -90,11 +116,15 @@ getDrillTime = (drillTime + 50 × hardness) / drillMultipliers
 
 | 方块 | 优势 | 本图可用？ |
 |---|---|---|
-| `multi-press` | `coal 3 → graphite 2`（省 25%） | ✗ 需水 |
-| `silicon-crucible` | `coal 4 + sand 6 + pyratite 1 → silicon 8`（省一半） | ✗ 建造成本要 plastanium，plastanium 需石油 |
+| `multi-press` | `coal 3 → graphite 2`（省 25%） | **✓ 可用** —— 它「需水」，而**水可以造**（见 §二 的更正）。原表标 ✗ 是同一个思维缺陷 |
+| `silicon-crucible` | `coal 4 + sand 6 + pyratite 1 → silicon 8`（省一半） | ✗ 建造成本要 plastanium，plastanium 需石油 —— **这条是「造不出来」，不是「图上没有」** |
 | `silicon-arc-furnace` | `silicon 4` | ✗ 建造成本要 beryllium（Erekir 资源） |
 
-**基础配方就够，这条不影响可行性。**
+**注意区分两类 ✗**：`silicon-crucible` / `silicon-arc-furnace` 是**建造成本链断了**
+（要的材料这张图产不出），而 `multi-press` 只是**要一种可以被生产出来的输入** ——
+后者不构成不可行。**别把两者混成一句「需水，所以不行」。**
+
+**基础配方始终够用，所以本节的结论不变；但「✗」的判据要写准。**
 
 ---
 

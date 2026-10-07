@@ -1404,22 +1404,41 @@ y=102  两条主干南下到底后拐进核心 (287,102)-(291,106)
 
 记下来，因为这就是参赛方要面对的全部难度 —— 它们拿不到源码，只有散文式的描述和试错。
 
-### 坑 1：以为「主干紧贴炉子」就等于「产物会进主干」
+### 坑 1（实为误判）：把失败归因于「带子不收侧向货」
 
-第一次复刻时主干（`tconv rot=1`）紧贴炉子铺好，结果 8 台炉子全堵在
+第一次复刻时主干（`tconv rot=1`）紧贴炉子铺好，8 台炉子全堵在
 `items={sand:10, coal:10, silicon:10}`、`eff=0`。
 
-**规则**：`Conveyor.acceptItem` 走的是
+**我当时的结论是「传送带只会把货往前推，不会侧向送给旁边的建筑」** ——
+于是把整条主干改成 `underflow-gate` 链，**白改了一轮**。真实原因是坑 2。
+
+**规则（源码确凿）**：`Conveyor.acceptItem`
 
 ```java
-Tile facing = Edges.getFacingEdge(source.tile, tile);
-int direction = Math.abs(facing.relativeTo(tile.x, tile.y) - rotation);
-return (((direction == 0) && minitem >= itemSpace)
-     || ((direction % 2 == 1) && minitem > 0.7f)) && ...;
+public boolean acceptItem(Building source, Item item){
+    if(len >= capacity) return false;                    // ← 坑 2 就在这一句
+    Tile facing = Edges.getFacingEdge(source.tile, tile);
+    if(facing == null) return false;
+    int direction = Math.abs(facing.relativeTo(tile.x, tile.y) - rotation);
+    return (((direction == 0) && minitem >= itemSpace)   // 背面来货：>= 0.4
+         || ((direction % 2 == 1) && minitem > 0.7f))     // 侧向：也收，门槛更严
+         && !(source.block.rotate && next == source);
+}
 ```
 
-`direction == 0`（正对）**或奇数**（侧向）都收 —— **带子确实收侧面的货**。
-真正的坑在下一句（见坑 2），而不是方位。**别把「方位算错」当成结论** —— 我在这里误判过一次。
+（`itemSpace = 0.4f`、`capacity = 3`、`minitem` 初值 `1`）
+
+**`direction == 0`（背面来货）或奇数（侧向）都收** —— 区别只在门槛。
+「拐弯处容易堵」的真正机理是**门槛更高**，不是「侧面不收」。
+
+> ⚠ **这一条我在 [`API.md`](API.md) 和 `transport` 的 `note` 字段里都写错过**
+> （写成「只从背面收料，侧向不接」），而
+> [`reviews/REVIEW-ADDENDUM.md`](reviews/REVIEW-ADDENDUM.md) 里**早就更正过**：
+> 「原文的『只从背面』是误归因……两侧也收，只是门槛更高（`> 0.7` vs `>= 0.4`）」。
+> **我没读到那份更正就重犯了一遍，还把它写进了给参赛 AI 看的字段。**
+>
+> 教训正是 [`TODO.md`](TODO.md) §五 第 23 条：**方向语义必须单侧隔离实测，静态分析不可靠** ——
+> 而这一条我既没实测、也没查已有的更正。
 
 ### 坑 2（真坑）：输出主干末端是死胡同 → 整条链拒收
 
@@ -1454,18 +1473,24 @@ return (((direction == 0) && minitem >= itemSpace)
 
 → 每批 ≤ 40 留余量，下完轮询 `/await?until=queueEmpty` 再下下一批。
 
-### 坑 5：先确认核心在哪
+### 坑 5：先认准**己方**核心在哪
 
-以为核心只有一处。实测 alpha 队当时有**四个**核心建筑：
+第一版布局建在 `(286,81)` —— 而那片恰好在 `crux`（team 2）的核心正上方，
+alpha 自己的核心在 `(61,104)`，相距 225 格，主干怎么铺都到不了。
+
+⚠ **顺带一个容易看错的点**：无迷雾时 `/buildings` **会把对手建筑一起列出来**
+（`fog = false` 让可见性判定短路）。那一局里因此能看到**四个**核心建筑：
 
 ```
-core-nucleus ( 61,104)     core-nucleus (289,104)
-core-shard   (174,168)     core-shard   (198, 27)
+core-nucleus ( 61,104)   ← alpha 自己（sharded）
+core-nucleus (289,104)   ← 对手 crux
+core-shard   (174,168)   ← 别的队
+core-shard   (198, 27)   ← 别的队
 ```
 
-第一版布局建在 `(286,81)`，而选定的核心在 `(61,104)` —— 相距 225 格，主干怎么铺都到不了。
+**它们不属于同一队。** 而 `team` 字段就在返回里 —— **看坐标之前先看 `team`**。
 
-→ **建产线前先 `/buildings` 确认核心落在哪，再在它正上方铺。**
+→ **建产线前先 `/buildings` 按 `team` 认准自己的核心，再在它正上方铺。**
 
 ### 复刻成功的实测（对齐 §三十五）
 

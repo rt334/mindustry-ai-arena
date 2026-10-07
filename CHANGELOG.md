@@ -10,6 +10,78 @@
 > [TODO.md](docs/TODO.md) 里「接口版本号没有约定」一条。
 
 
+## 自检修正：`transport` 的 `note` 写错过传送带的收货规则（2026-10-06）
+
+一次文档自检发现：**`/block` 的 `transport` 条目把我自己的误判当规则写给了 AI。**
+
+```
+错的（已删）
+conveyor          → "沿朝向逐格推进；只从背面收料，侧向不接"
+armored-conveyor  → "同传送带，但不接受侧向输入"
+conduit           → "沿朝向输送液体；只从背面收，侧向不接"
+```
+
+**源码不是这样。** `Conveyor.acceptItem`：
+
+```java
+if(len >= capacity) return false;
+int direction = Math.abs(facing.relativeTo(tile.x, tile.y) - rotation);
+return (((direction == 0) && minitem >= itemSpace)   // 背面来货：>= 0.4
+     || ((direction % 2 == 1) && minitem > 0.7f));     // 侧向：**也收**，门槛更严
+```
+
+**侧向是收的**，只是门槛更高 —— 所以「拐弯处容易堵」的机理是门槛，不是拒收。
+`ArmoredConveyor` 也不是「不收侧向」，而是**侧向只放行其他传送带送来的**。
+
+修正后：
+
+| `how` | 修正后 |
+|---|---|
+| `conveyor` | 沿朝向逐格推进；背面来货门槛松，侧向也收、但要求带子更空 —— 所以拐弯处特别容易堵 |
+| `armored-conveyor` | 同传送带，但侧向输入只接受其他传送带送来的货；建筑从侧面直接送不进来 |
+| `conduit` | 沿朝向输送液体（液体管道不按物品过滤） |
+
+`conduit` 那条**去掉了方位断言** —— 它的方位算法与传送带不同（`absoluteRelativeTo`），
+而我**没有逐方位实测过液体**，所以只留确凿的部分。
+
+> **这个错误本来可以避免**：[`docs/reviews/REVIEW-ADDENDUM.md`](docs/reviews/REVIEW-ADDENDUM.md) §6.1
+> 早就更正过同一句话（「原文的『只从背面』是误归因」），而我没读到就重犯了一遍。
+> [`docs/TODO.md`](docs/TODO.md) §五 第 23 条也立了规矩：**方向语义必须单侧隔离实测**。
+> 详见 [`docs/ENGINE-NOTES.md`](docs/ENGINE-NOTES.md) §三十六 坑 1。
+
+## 自检修正：多处文档「本图无水 ⇒ speed = 1」是错的（2026-10-06）
+
+同一次自检还发现一个**跨多份文档的系统性错误**：把「图上没有天然液体地块」
+当成了「水不可得」。
+
+**水可以被生产**：`water-extractor` 在**干地上**就能产水
+（`SolidPump.baseEfficiency = 1f`，`canPump(tile) = !tile.floor().isLiquid`），实测 `6.6/s`。
+而钻机的水加成只认**自己建筑内的液体库存**：
+
+```java
+// ConsumeLiquid.efficiency(Building)
+return Math.min(build.liquids.get(liquid) / (amount * ed * multiplier.get(build)), 1f);
+```
+
+**它不检查环境。** 所以只要有管道把水送进钻机，
+`speed = Mathf.lerp(1f, liquidBoostIntensity, 1f) = 1.6` —— **那 1.6 倍是拿得到的。**
+
+**影响**：所有按裸速算的矿机产率表**偏低 1.6 倍**；
+`FEASIBILITY.md` §三 把 `multi-press` 标成「✗ 需水」也不成立（水能造）。
+
+**已修正**：`FEASIBILITY.md`（§二加更正块、§三区分两类 ✗）、`TODO.md` 第 14 条、
+`reviews/REVIEW-ADDENDUM.md`（加注记，原表不动 —— 那是评审记录）、
+`reviews/FEATURE-REQUESTS.md`（A1 标记已实现一半 + 更正措辞）、
+`reviews/DEBUG-LOG.md`（2.1 加更正）。
+
+**尚未实测**：按 §五 第 23 条的纪律，水加成这条是**源码推导 + 机制自洽**，
+仍需一局对照（「钻机 + 水线」vs「同位置裸钻机」的 `efficiency` 之比应为 1.6）。
+**绝对数字暂不改，先补对照。**
+
+> 讽刺的是，这正是 AI 在对局里暴露的同一个思维缺陷
+> （「只知道要水，但地图上没有，就不再考虑从其他渠道获取」）——
+> **「图上没有」不等于「拿不到」，因为资源可以被生产。**
+
 ## `/block` 新增 `area`：范围类参数（2026-10-06）
 
 「它能作用到多远」以前**只在源码里**。`description` 用的是相对说法 ——

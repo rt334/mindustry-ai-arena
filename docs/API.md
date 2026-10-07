@@ -859,7 +859,11 @@ progress=0.99  rate=0.70  eta=0
 
 | `how` | 规则 |
 |---|---|
-| `conveyor` / `armored-conveyor` / `duct` / `conduit` | 沿朝向逐格推进；**只从背面收料，侧向不接**（`armored-*` 是连侧向输入都不收的加固版） |
+| `conveyor` | 沿朝向逐格推进；**背面来货门槛松、侧向也收但门槛更严** —— 拐弯处因此特别容易堵 |
+| `armored-conveyor` | 同传送带，但**侧向输入只接受其他传送带送来的货**；建筑从侧面直接送不进来（必须对准背面） |
+| `duct` | 沿朝向单格输送 |
+| `conduit` | 沿朝向输送液体（液体管道不按物品过滤） |
+| `armored-conduit` | 同液体管道，但侧向输入只接受其他管道、液体桥或液体交叉送来的 |
 | `stack-conveyor` | 沿朝向推进，一次搬运一整叠 |
 | `junction` / `duct-junction` / `liquid-junction` | **交叉不打结**：各方向的货各自直行穿过、互不混流 |
 | `router` / `duct-router` / `liquid-router` | **在所有可收的邻格之间轮流发** —— 这就是「一路分多路」 |
@@ -885,7 +889,9 @@ progress=0.99  rate=0.70  eta=0
 
 **泵类的 `baseEfficiency` / `attribute` 是回答「它非要建在水源上吗」的两个字段**：产能 = `baseEfficiency + 脚下的 attribute 值`，而 `attribute` 只是**加成**项。只看 `attribute=water` 会得出「没水就不能用」——那是错的。
 
-> 这段话来自一次实测：AI 查到钻机 `inputs` 里有 `water (optional)`，想找水，`/map` 上没有，于是查「哪个方块产水」，而 `water-extractor` 的 `outputs` 当时是 `[]` —— 它的每一步推理都成立，结论却是「这张图的水拿不到」。**接口给了它否定的答案。**
+> 这段话来自一次实测：AI 查到钻机 `inputs` 里有 `water (optional)`，想找水，`/map` 上没有，于是查「哪个方块产水」，而 `water-extractor` 的 `outputs` 当时是 `[]` —— 它的每一步推理都成立，结论却是「这张图的水拿不到」。
+>
+> **措辞要准**：不是「接口告诉它没有水」—— `water-extractor` 的描述里一直写着「从地下提取水，**适用于附近没有地表水的情况**」，信息从来没缺。准确的说法是：**它读的那一半（结构字段）是空的，而规则写在另一半（散文）里。** 见上面那段自我更正。
 
 `outputs[].tier` 是**采矿等级**：钻机只能采 `hardness ≤ tier` 的矿（`/ore` 的 `canMine` 就是这个判定的结果）。
 

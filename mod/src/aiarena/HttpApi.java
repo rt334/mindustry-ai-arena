@@ -1634,9 +1634,20 @@ public final class HttpApi {
         if (b instanceof mindustry.world.blocks.distribution.StackConveyor) {
             how = "stack-conveyor"; note = "沿朝向推进，一次搬运一整叠";
         } else if (b instanceof mindustry.world.blocks.distribution.ArmoredConveyor) {
-            how = "armored-conveyor"; note = "同传送带，但不接受侧向输入";
+            // 源码：`super.acceptItem(...) && (source.block instanceof Conveyor
+            //        || Edges.getFacingEdge(source.tile, tile).relativeTo(tile) == rotation)`
+            // ⇒ 在普通传送带的规则之上，侧向输入只放行「其他传送带送来的」。
+            how = "armored-conveyor";
+            note = "同传送带，但侧向输入只接受其他传送带送来的货；"
+                 + "建筑从侧面直接送不进来（必须对准背面）";
         } else if (b instanceof mindustry.world.blocks.distribution.Conveyor) {
-            how = "conveyor"; note = "沿朝向逐格推进；只从背面收料，侧向不接";
+            // 源码：`direction = |facing.relativeTo(tile) - rotation|`，
+            // 收 `direction == 0`（背面）**或奇数**（侧向）。
+            // ⚠ 曾误写成「只从背面收料，侧向不接」—— 侧向是收的，只是门槛更严
+            //    （背面 `minitem >= 0.4`，侧向 `> 0.7`）。
+            how = "conveyor";
+            note = "沿朝向逐格推进；背面来货门槛松，侧向也收、但要求带子更空 —— "
+                 + "所以拐弯处特别容易堵";
         } else if (b instanceof mindustry.world.blocks.distribution.StackRouter) {
             how = "stack-router"; note = "在所有可收的邻格之间轮流发，整堆为单位";
         } else if (b instanceof mindustry.world.blocks.distribution.DuctRouter) {
@@ -1658,9 +1669,14 @@ public final class HttpApi {
         } else if (b instanceof mindustry.world.blocks.liquid.LiquidRouter) {
             how = "liquid-router"; note = "液体版分流：在所有可收的邻格之间轮流发";
         } else if (b instanceof mindustry.world.blocks.liquid.ArmoredConduit) {
-            how = "armored-conduit"; note = "同液体管道，但不接受侧向输入";
+            // 与 ArmoredConveyor 同构：侧向输入只放行其他管道 / 液体桥 / 液体交叉。
+            how = "armored-conduit";
+            note = "同液体管道，但侧向输入只接受其他管道、液体桥或液体交叉送来的";
         } else if (b instanceof mindustry.world.blocks.liquid.Conduit) {
-            how = "conduit"; note = "沿朝向输送液体；只从背面收，侧向不接";
+            // ⚠ 曾误写成「只从背面收，侧向不接」。源码里那个方位条件是**筛选**、
+            // 不是「只收背面」，但它用的方位算法与传送带不同（`absoluteRelativeTo`），
+            // 且**未逐方位实测** —— 所以这里只给确凿的部分，不给断言。
+            how = "conduit"; note = "沿朝向输送液体（液体管道不按物品过滤）";
         } else if (b instanceof mindustry.world.blocks.distribution.OverflowDuct) {
             how = "overflow-duct"; note = "同溢流门：优先一侧，满则溢到另一侧";
         } else if (b instanceof mindustry.world.blocks.distribution.DuctJunction) {

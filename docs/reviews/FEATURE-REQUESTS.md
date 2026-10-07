@@ -18,6 +18,21 @@
 
 **建议**：`/buildings` 里每个 conveyor 直接给出 `acceptsFrom` 和 `sendsTo`（两个坐标）；或在 `/content` 的方块定义里补 `inputFacing`/`outputFacing` 语义字段。
 
+> ### 更新（2026-10-06）
+>
+> **1. 已实现一半。** `/block?name=<传送带>` 的 `outputs[]` 现在带
+> `kind: "transport"` + `how` + `note`，把「怎么送」变成机读字段（覆盖 39 个转运件，
+> 见 [`../API.md`](../API.md) 的转运件表）。`/buildings` 早就有 `sendsTo`。
+> **仍未做**：`acceptsFrom`（"它收谁"这一半）。
+>
+> **2. 措辞要更正。** 上面写的「带子**只从背面收料**」**不精确** ——
+> 源码是 `direction == 0`（背面）**或奇数（侧向）` 都收**，区别只在门槛
+> （背面 `minitem >= 0.4`，侧向 `> 0.7`）。见
+> [`REVIEW-ADDENDUM.md`](REVIEW-ADDENDUM.md) §6.1 与
+> [`../ENGINE-NOTES.md`](../ENGINE-NOTES.md) §三十六 坑 1。
+> **「拐弯处必须放 router」这个工程结论仍然成立** —— 机理是「侧向门槛更高」，
+> 不是「侧向不收」。
+
 ---
 
 ### A2. 钻机输出格不确定，且 `rotation` 回读不可信
