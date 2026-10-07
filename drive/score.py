@@ -51,6 +51,7 @@ ADMIN_FILE = ROOT / "server-run" / "admin-token.txt"
 CONFIG = ROOT / "server-run" / "config" / "ai-arena.json"
 
 TARGET_ITEM = "silicon"          # 这一局的目标物品
+TARGET_RATE = 5.0                # 门槛：净产出必须 ≥ 这个值，否则 0 分
 TEAM_NAME = {"1": "alpha", "2": "beta", "100": "sharded", "101": "crux"}
 
 
@@ -78,6 +79,27 @@ def load_admin() -> str | None:
     if ADMIN_FILE.exists():
         return ADMIN_FILE.read_text(encoding="utf-8-sig").strip()
     return None
+
+
+def stalls_of(base: str, agent: str, token: str):
+    """该队当前的警报：`(条数, Σ heldSeconds, 按 kind 分类)`。
+
+    **`heldSeconds` 是「这条警报已经挂了多久」**（引擎侧算的：异常出现开始计时、
+    类型变化时重置、方块恢复正常就不再报）—— 所以它天然是「放任不管的时长」的度量，
+    不需要去猜它有没有「处理」，也就没法投机：**不处理就一直在涨**。
+    """
+    d = get(base, agent, token, "stalls")
+    arr = (d.get("data") or {}).get("stalls") or []
+    held = 0.0
+    kinds: dict = {}
+    for s in arr:
+        try:
+            held += float(s.get("heldSeconds") or 0)
+        except (TypeError, ValueError):
+            pass
+        k = s.get("kind") or "?"
+        kinds[k] = kinds.get(k, 0) + 1
+    return len(arr), held, kinds
 
 
 def board(base: str, admin: str, window: float) -> list[dict]:
@@ -126,12 +148,29 @@ def board(base: str, admin: str, window: float) -> list[dict]:
         per_sec = item.get("perSecond", 0.0)
         teamb = (get(base, aid, tok, "buildings").get("data") or {}).get("buildings") or []
         blocks = len([b for b in teamb if b.get("team") == tid])
-        eff = (per_sec / blocks) if (isinstance(per_sec, (int, float)) and blocks > 0) else None
+
+        # 警报：默认 `view=own`，拿到的就是它自己队该管的那些
+        n_stalls, held_sum, kinds = stalls_of(base, aid, tok)
+
+        eff = (per_sec / blocks) if (isinstance(per_sec, (int, float)) and blocks > 0) else 0.0
+        # **门槛与排名分开**（LESSONS §3.5 的规矩一）：不达标的**效率分记 0**，
+        # 否则「省到不出货」是公式允许的合法解 —— 上一版就是这么翻车的。
+        # 注意门槛挡的是**奖励**，不是**惩罚** —— 罚分照扣，见下。
+        meets = isinstance(per_sec, (int, float)) and per_sec >= TARGET_RATE
+        penalty = held_sum / 60.0                          # 单位：分钟·条
+        # 未达标时**效率分记 0**（不给「省到不出货」任何奖励 —— 那是上一版翻车的地方），
+        # 但**罚分照扣、可以扣成负分**。
+        # 第一版写的是「不达标就整个 0 分」，实测发现那等于把罚分也一起免了 ——
+        # 而有警报的阶段**恰好就是没达标的阶段**（有警报 ⇒ 产线有问题 ⇒ 产率低），
+        # 于是「有警报不处理」永远没有代价。门槛挡的是**奖励**，不该挡**惩罚**。
+        score = (eff * 100.0 if meets else 0.0) - penalty
         rows.append({"agent": aid, "team": tid,
                      "teamName": TEAM_NAME.get(str(tid), d2.get("teamName") or str(tid)),
                      "perSecond": per_sec, "blocks": blocks,
                      "stock": item.get("end"), "efficiency": eff,
-                     "tick": tick})
+                     "stalls": n_stalls, "heldSeconds": held_sum,
+                     "penalty": penalty, "meets": meets, "score": score,
+                     "kinds": kinds, "tick": tick})
     return rows
 
 
@@ -140,16 +179,21 @@ def show(rows: list[dict], window: float) -> None:
     if not rows:
         print(f"[{ts}] 算不出分 —— 服务器在跑吗？状态是不是 playing？")
         return
-    print(f"[{ts}]  目标 {TARGET_ITEM} · /rates 窗口 {window}s")
+    print(f"[{ts}]  目标 {TARGET_ITEM} ≥ {TARGET_RATE}/s（门槛） · /rates 窗口 {window}s")
     for r in rows:
-        ps = r["perSecond"]
-        eff = r["efficiency"]
+        ps, eff = r["perSecond"], r["efficiency"]
         ps_s = f"{ps:+.2f}/s" if isinstance(ps, (int, float)) else "  n/a "
-        eff_s = f"{eff:.5f}" if isinstance(eff, (int, float)) else " n/a "
-        print(f"    {r['agent']:6s} team={r['team']:<3} "
-              f"净产率 {ps_s:>9s}   方块 {r['blocks']:>4d}   "
-              f"库存 {str(r['stock']):>6s}   效率分 {eff_s}")
-    print(f"    分数 = 核心净产率({TARGET_ITEM}, /s) ÷ 己方方块数")
+        gate = "达标" if r["meets"] else "不达标"
+        kinds = " ".join(f"{k}×{v}" for k, v in sorted(r["kinds"].items())) or "—"
+        print(f"    {r['agent']:6s} team={r['team']:<3} 净产率 {ps_s:>9s} [{gate}]  "
+              f"方块 {r['blocks']:>4d}  效率 {eff:.5f}")
+        print(f"           警报 {r['stalls']:>3d} 条 / 累计挂机 {r['heldSeconds']:>8.1f}s"
+              f" → 罚分 {r['penalty']:>7.2f}")
+        print(f"           警报明细 {kinds}")
+        print(f"           总分 {r['score']:>7.2f}"
+              + ("" if r["meets"] else "   （未过门槛：效率分记 0，但罚分照扣）"))
+    print(f"    总分 = 效率分×100 − 警报罚分(ΣheldSeconds÷60)；"
+          f"未达 {TARGET_RATE}/s 时效率分记 0、**罚分照扣（可为负）**")
 
 
 def main() -> int:
