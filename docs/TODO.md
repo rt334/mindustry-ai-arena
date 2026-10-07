@@ -1117,7 +1117,7 @@ AI 在游戏里拿不到这些规则，只能靠散文式描述（`underflow-gat
 
 | # | 问题 | 影响 |
 |---|---|---|
-| 1 | **「它读完告警之后做了什么」目前答不了** | 数据源的能力边界。**要答只能给 `CALLS` 加一个「最后一次调用时刻」** —— 最小、且不越线的改法（纯诊断，不告诉它该做什么） |
+| 1 | ~~「它读完告警之后做了什么」目前答不了~~ → **2026-10-07 已在会话侧解决** | 服务端那两个源确实都不够（`Audit` 只记写、`CALLS` 无时间戳）。但**参赛 AI 自己的会话记录三样全有**：reasoning / tool 调用 / 结果 —— 见新工具 **`drive/agent-trail.py`**（§14.7）。**服务端侧仍待做**，而且仍有必要：会话文件在参赛进程自己的机器上、可被删改，**仲裁只能凭服务端那一份** |
 | 2 | **`51d6dac` 的 `/stalls` 视角裁剪从未被行为验证** | 「读了 25 次却在对手告警里找不到自己那条」是**修复前**的数据，修复后不可外推。C 不是待建，是**已做未验证** |
 | 3 | **样本不对称** | 人类那份布局是 n=1 且带 30+ 轮迭代与 5 次踩坑；AI 是 n=2、无方差、单指标。`LESSONS.md §1.5` 专门写过「别把维护者试了 30 轮和被试者第一次接触并列比」 |
 | 4 | **缺判别实验** | 顾问们都在推永久改动，没人提出一天可做的同局 A/B（同图同目标，一局给堵塞遥测、一局不给）。**先测量，再动接口** |
@@ -1129,4 +1129,55 @@ AI 在游戏里拿不到这些规则，只能靠散文式描述（`underflow-gat
 **`Audit` 与 `CALLS` 是这一轮唯一能定论「它试过什么」的数据源，而它们的覆盖面恰好是互补的两半**：
 一个记**写动作**但不知道你何时读了什么，一个记**读次数**但不知道先后。
 **下一轮要回答行为问题时，先看这两个够不够 —— 不够就先补数据源，别先写结论。**
+
+### 14.7 子代理动作审计（`drive/agent-trail.py`）
+
+§14.5#1 那个问题换了个方向解决：不去补服务端数据源，而是**读参赛 AI 自己的会话记录**。
+
+参赛 AI 是 DSH 子代理，会话存在
+`%USERPROFILE%\.dsh\sessions\<cwd 编码>\<id>\session.v4.jsonl.zstd`，**三样东西全在里面**：
+
+| 想知道 | 会话里的位置 |
+|---|---|
+| 在想什么 | `assistant/message` → `content[]` 里的 `{"type":"reasoning"}` |
+| 调了什么 | `tool/call` → `name` + `arguments`（完整命令行） |
+| 拿到什么 | `tool/result` → `content[]` |
+
+```powershell
+python drive/agent-trail.py --list                     # 147 个会话，带 label / model / 深度
+python drive/agent-trail.py --id 9bb3f4ea              # 整条时间线（想 → 调 → 得）
+python drive/agent-trail.py --id 9bb3f4ea --http       # 只看接口调用（分 exec/wrap/src 三层）
+python drive/agent-trail.py --id 9bb3f4ea --files      # 只看文件访问 + **越界标记**
+python drive/agent-trail.py --id 9bb3f4ea --thinking   # 只看 reasoning
+python drive/agent-trail.py --id 9bb3f4ea --commands   # 命令行原文（正则抓不全时的兜底）
+```
+
+**三层调用形态按证据强度分开报**，混在一起会把「打算调」当成「调了」：
+`exec` = 命令行里实际执行的 curl；`wrap` = 走 `arena.py` 封装；
+`src` = 写在自建脚本里的 `a.xxx()`，**未必执行过**。
+
+**它已经产出的实质结论**（都核实过是真访问，不是正则误抓）：
+
+| 会话 | 发现 |
+|---|---|
+| 第八轮观测局 `1678318f` | turn 1 step 54 执行了 `rg -n "config" C:\dsh\ai-arena\docs\API.md` |
+| 对战局 `dfcf6d99` | turn 1 step 4 列了 `C:\dsh\ai-arena\_work`（维护者工作目录） |
+| 布局测试 `9bb3f4ea` | 92 步、50 个 reasoning 块、**0 次越界**；期间调过 `a.stalls() ×6` |
+
+> 🚨 **第一条暴露的是项目自己的规则冲突，不是 agent 的问题。**
+> `AGENTS.md` 写着「参赛 AI 该读的是 `skill/` 与 `docs/API.md`（接口手册）」，
+> 而那几轮的任务书写的是「**不要读 `docs/`、`drive/`、`mod/`、`_work/` 下的任何文件**」。
+> 于是 `API.md` **既被允诺又被禁止** —— agent 按 `AGENTS.md` 去查它，就撞上了当轮任务书。
+> **该修的是任务书的措辞**（把 `docs/API.md` 排除在外，或改成「只准读它」），
+> 而不是给 agent 记一次越界。**待做**。
+
+**两个实现坑**（都踩过，原因写在代码注释里）：`stream_reader.read(n)` **不保证返回 n 字节**
+（撞 zstd 帧边界就返回 —— 请求 8192 只拿回 262，于是 `--list` 的 label 列全空）；
+以及第一版只抓完整 URL，而那个 agent 把调用全写进自建脚本（40 次 `write` 全是
+`from arena import Arena`）—— 改成动态读 `skill/scripts/arena.py` 的方法名来认之后，
+接口调用数从 **6 变成 159**。
+
+**边界（别误用）**：它**只覆盖 DSH 子代理**；会话文件在参赛进程自己的机器上、**可被删改**，
+所以它适合**复盘与自查**，**不适合当仲裁的唯一凭据** —— 仲裁要凭服务端那份
+（`server-run/ai-arena-audit.jsonl` + `/events` + 录像）。
 

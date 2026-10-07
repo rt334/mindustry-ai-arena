@@ -182,7 +182,8 @@ public class OfflineChecks {
         // 一整个字符串构造循环）。现在两个值走同一次 `viewOf(viewId)`。
         //
         // 用 group 包住：StallWatch 是游戏内类，万一静态初始化在无 Vars 的
-        // 裸 JVM 里出问题，应该记 SKIP，而不是让整套 72 项断言一起崩。
+        // 裸 JVM 里出问题，应该记 SKIP，而不是让整套断言一起崩。
+        // （这里刻意不写死项数：那个数字加一条就变，写了迟早是错的。）
         group("StallWatch 快照", () -> {
             for (int view : new int[]{-1, 0, 1}) {
                 Object[] v = StallWatch.viewOf(view);

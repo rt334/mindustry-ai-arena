@@ -22,6 +22,7 @@
 | 排查「图纸对但实际不通」 | [`docs/ENGINE-NOTES.md`](docs/ENGINE-NOTES.md) |
 | 全部文档的索引 | [`docs/README.md`](docs/README.md) |
 | **按需取某一节**（别整份读） | `python drive/docs-index.py --grep <关键词>` → 再 `--read "文件.md#节标题"` |
+| **审计某个参赛 AI 想了什么 / 调了什么 / 碰了哪些文件** | `python drive/agent-trail.py --list`，再 `--id <前缀>`（可加 `--thinking` / `--http` / `--files` / `--commands`；见 [TODO](docs/TODO.md) §14.7） |
 
 ## 铁律（都是违反过、吃过亏的）
 
@@ -68,7 +69,7 @@ $mj = 'C:\dsh\Mindustry-src\desktop\build\libs\Mindustry.jar'
 | 层次 | 手段 | 要不要起游戏 |
 |---|---|---|
 | 编译 / class 集合一致性 | 上面的 `javac` + `jar tf` 比对 | 不要 |
-| **离线断言套件**（72 项：JSON 转义 / 响应信封 / 审计判定 / 状态码映射 / 端点数量 / 错误码集合 / `shape` 取值 / jar 条目 / 文档里写死的数字 / 死参数扫描） | `python drive/offline-checks.py`（`--src` 可跳过 JVM） | 不要 |
+| **离线断言套件**（91 项：JSON 转义 / 响应信封 / 审计判定 / 状态码映射 / 端点数量 / 错误码集合 / `shape` 取值 / jar 条目 / 文档里写死的数字 / 死参数扫描 / `StallWatch` 快照同源） | `python drive/offline-checks.py`（`--src` 可跳过 JVM） | 不要 |
 | **`skill/` 边界检查**（参赛者可见包有没有泄漏游戏内情） | `python drive/check-boundary.py`（先 `--selftest`） | 不要 |
 | **文档按需检索**（取某一节，而不是整份读） | `python drive/docs-index.py --grep/-read` | 不要 |
 | 全功能回归 | `.\stress-test.ps1`（62 用例，自起服务器） | 要 |
