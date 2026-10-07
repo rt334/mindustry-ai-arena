@@ -110,6 +110,22 @@ public final class HttpApi {
     private static final java.util.concurrent.ConcurrentHashMap<String,
         java.util.concurrent.atomic.AtomicLong> CALLS = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /**
+     * 每个 `agentId:action` 的**最后一次调用时刻**（`System.currentTimeMillis()`）。
+     *
+     * 为什么光有 `CALLS` 不够（TODO §14.5#1）：
+     *   计数答得了「它调了多少次 `/stalls`」，**答不了「它读完告警之后紧接着做了什么」**——
+     *   而后者才是区分「没读」和「读了没照做」的关键。审计日志补不了这一半：
+     *   它只记**写**操作，读操作一条不留（实测那局 AI 调 25 次 `/stalls`，审计里 0 条）。
+     *   所以时序只能在这里补。
+     *
+     * **纯粹是诊断**：只记「什么时候调的」，不记请求内容、不给任何建议 ——
+     * 既不越过 `DESIGN.md` §7.9 的边界，也不改变任何端点返回值。
+     * 与 `CALLS` 分开存是为了不改 `endpointCalls` 的既有形状（那是已公开的契约）。
+     */
+    private static final java.util.concurrent.ConcurrentHashMap<String,
+        java.util.concurrent.atomic.AtomicLong> LAST_CALL = new java.util.concurrent.ConcurrentHashMap<>();
+
     private static void route(HttpExchange ex) {        try {
             String path = ex.getRequestURI().getPath();      // /v1/{agent}/{action}
             String[] parts = path.split("/");
@@ -185,8 +201,13 @@ public final class HttpApi {
             // 却始终不知道它是没读、还是读了没照做 —— 只能从结果反推，那就是猜。
             // 有了这个计数，那一类问题就变成可观测的。
             try {
-                CALLS.computeIfAbsent(agent.id + ":" + action,
+                String callKey = agent.id + ":" + action;
+                CALLS.computeIfAbsent(callKey,
                         k -> new java.util.concurrent.atomic.AtomicLong()).incrementAndGet();
+                // 同一个 key 的「最后一次调用时刻」，与计数在同一点更新 ——
+                // 一次请求只在这里动一次状态，两者不会错开。见 LAST_CALL 的说明。
+                LAST_CALL.computeIfAbsent(callKey,
+                        k -> new java.util.concurrent.atomic.AtomicLong()).set(System.currentTimeMillis());
             } catch (Throwable ignored) { }
 
             switch (action) {
@@ -3073,6 +3094,9 @@ public final class HttpApi {
                 // 回答「AI 有没有读 /stalls / /watch / /rates」这类问题 ——
                 // 审计日志只记改状态的操作，看不了这个。
                 .putRaw("endpointCalls", callsJson(agent))
+                // 每个端点**最后一次**是什么时候调的。计数答得了「读没读」，
+                // 答不了「读完紧接着做了什么」—— 这一项就是补那一半（TODO §14.5#1）。
+                .putRaw("endpointLastCall", lastCallsJson(agent))
                 .putRaw("players", players.toString())
                 .putRaw("teams", teams.toString())
                 .putRaw("disconnectReasons", Diag.reasonHistogramJson())
@@ -3111,6 +3135,42 @@ public final class HttpApi {
             if (!first) sb.append(',');
             first = false;
             sb.append(Json.str(k)).append(':').append(CALLS.get(k).get());
+        }
+        return sb.append('}').toString();
+    }
+
+    /**
+     * 每个端点的**最后一次调用时刻**（`/diag` 的 `endpointLastCall`）。
+     *
+     * 与 `endpointCalls` 配套：那个给「调了多少次」，这个给「最后一次是什么时候」。
+     * **两个合起来才够回答「它读完告警之后紧接着做了什么」** —— 单独任何一个都不行
+     * （见 `LAST_CALL` 的说明与 TODO §14.5#1）。
+     *
+     * `agoSec` 由服务端算好给出去，省得调用方拿本地时钟对时：
+     * 两边本来就都在同一台机器上，让它自己减只会引入不必要的时钟假设。
+     *
+     * 可见性口径与 `callsJson` 完全相同（只给调用方自己的，`canReferee` 才看全部）——
+     * 两份数据回答的是同一件事的两半，口径不允许有第二套。
+     */
+    private static String lastCallsJson(AIArena.Agent agent) {
+        long now = System.currentTimeMillis();
+        StringBuilder sb = new StringBuilder("{");
+        boolean first = true;
+        java.util.ArrayList<String> keys = new java.util.ArrayList<>(LAST_CALL.keySet());
+        // 最近调过的排前面 —— 与 endpointCalls 按次数排同一个意图：该看的在上面
+        keys.sort((a, b) -> Long.compare(
+            LAST_CALL.getOrDefault(b, ZERO).get(), LAST_CALL.getOrDefault(a, ZERO).get()));
+        for (String k : keys) {
+            boolean mine = k.startsWith(agent.id + ":");
+            if (!mine && !agent.canReferee) continue;
+            if (!first) sb.append(',');
+            first = false;
+            long t = LAST_CALL.getOrDefault(k, ZERO).get();
+            if (t <= 0L) continue;
+            sb.append(Json.str(k)).append(':').append(new Json.Obj()
+                .put("lastMs", t)
+                .put("agoSec", (float) Math.round((now - t) / 100.0) / 10f)
+                .toString());
         }
         return sb.append('}').toString();
     }

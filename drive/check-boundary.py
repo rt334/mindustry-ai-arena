@@ -42,7 +42,13 @@ DEFAULT_TARGET = TARGET
 # 所以同样不许出现游戏内情。
 # 2026-10-06 差点在这里漏掉一处：我在 PROMPTS.md 里写了「全图的煤够放约 160 台」，
 # 而当时的检查只覆盖 skill/。**「参赛者读物」的范围比 skill/ 大。**
-EXTRA_TARGETS = [ROOT / "docs" / "PROMPTS.md"]
+#
+# 2026-10-07 补 `API.md`：`AGENTS.md` 明写「参赛 AI 该读的是 `skill/` 与 `docs/API.md`
+# （接口手册）」——**既然允诺它可读，就必须有检查保证它真能读**，否则那个允诺
+# 只是在口头上成立。这一条是被一次审计撞出来的：有 agent 按 AGENTS.md 去查
+# `docs/API.md` 的 `/config` 段，却撞上当轮任务书「不要读 docs/ 下的任何文件」。
+# 两边打架的根因是「参赛者读物」的清单没人维护 —— 现在它有了。
+EXTRA_TARGETS = [ROOT / "docs" / "PROMPTS.md", ROOT / "docs" / "API.md"]
 
 # ---- 违规规则：(名称, 正则, 理由) ----
 # ⚠ 不要把**接口返回的字段名**列进来。

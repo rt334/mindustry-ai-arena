@@ -222,7 +222,7 @@ Python 侧用 `arena.load_admin_token()`；参赛客户端用 `arena.load_own_to
 
 | 想要的东西 | 为什么不给 |
 |---|---|
-| 某条链的**吞吐上限**（如「1.2/s」） | 游戏从不显示速率数字。玩家要数物品、掐时间、自己除 |
+| 某条链的**吞吐上限**（如「1.2/s」） | 游戏从不显示速率数字。玩家要数物品、掐时间、自己除 | <!-- boundary-ok: 反面举例 —— 这一行写的正是「这种信息不给」 -->
 | **瓶颈在哪一格** | 那是推导结果，不是显示结果 |
 | **「这条链正在减速」** | 带子还在动，肉眼看不出来。`beltStall` 的判据是「完全不动」（`clogHeat` 逼近 1），不是「变慢了」 |
 | **外推的产率预测** | `/rates` 给的是两个时间点的库存差 —— 玩家记两个数自己减也能得到，不外推 |
@@ -337,7 +337,7 @@ Python 侧用 `arena.load_admin_token()`；参赛客户端用 `arena.load_own_to
 
 #### `itemCapacity` —— 每种物品各自的上限
 
-**它不是一个总量。** 一台 `itemCapacity: 10` 的机器可以**同时**存 10 个沙 + 10 个煤，
+**它不是一个总量。** 一台 `itemCapacity: 10` 的机器可以**同时**存 10 个沙 + 10 个煤，<!-- boundary-ok: 讲的是字段语义（每种物品各自的上限、不是总量）；10 只是举例，真值 `/buildings` 本来就逐台给 -->
 互不挤占；煤不会因为沙多了而进不去。
 
 判据在引擎里写得非常直接：
@@ -506,7 +506,7 @@ AI 那个位置看不出「哪几条是我该管的」——它读了 25 次告�
 | `powerUnconnected` / `powerStarved` | 电力条空 / 连线断，屏幕上直接显示 |
 | `missingInput` | 方块停着；配方要什么、库里有不有，选中就能看 |
 
-**不报**「这条链在减速」「吞吐上限只有 1.2/s」这类 —— 那是**观察 + 推导**得出的，
+**不报**「这条链在减速」「吞吐上限只有 1.2/s」这类 —— 那是**观察 + 推导**得出的，<!-- boundary-ok: 反面举例 —— 这句正是在说明它不报 -->
 游戏界面从不显示，得自己盯一段时间算出来。接口直接给就等于送答案。
 
 同理 `beltStall` 的阈值是引擎的 `clogHeat` 逼近 1（约堵了一秒），
@@ -749,6 +749,31 @@ progress=0.99  rate=0.70  eta=0
 > 实测：观察到某一局里 `queue` 的调用次数是 `place` 的**数倍** ——
 > 也就是大部分模型往返花在「问好了没」上。**这个结论在加 `endpointCalls` 之前拿不到。**
 
+#### `endpointLastCall` —— 每个端点最后一次是什么时候调的
+
+```json
+{"<agent>:stalls": {"lastMs": 1791382585197, "agoSec": 42.5},
+ "<agent>:place":  {"lastMs": 1791382582911, "agoSec": 44.8}}
+```
+
+键与可见性口径跟 `endpointCalls` **完全一样**（`agentId:action`、默认只看自己的、
+`canReferee` 能看全部），只是换成时刻。按**最近调过的排前面**。
+
+**为什么计数之外还要这个**：计数答得了「它读了多少次 `/stalls`」，
+**答不了「它读完告警之后紧接着做了什么」** —— 而分清「没读」和「读了没照做」
+恰恰需要后者。审计日志补不了这一半：它只记**改状态**的操作，读接口一条不留。
+
+`agoSec` 由服务端算好，省得你拿本地时钟去对（两边本来就在同一台机器上）。
+把它和上面的计数并排看，能直接读出一类信号：
+
+| 现象 | 说明 |
+|---|---|
+| `stalls` 的 `agoSec` 很小，但之后没有任何 `place` / `batch` | **读了，但没照着改** |
+| `stalls` 的 `agoSec` 一直很大 | **压根没巡检** |
+
+> **纯粹是遥测**：只记「什么时候调的」，不记请求内容、不给任何建议 ——
+> 它不会告诉你该建什么、该改哪一格。
+
 ### `GET /content`
 
 方块 / 物品 / 单位表。**运行时取用，不要凭记忆。**
@@ -770,8 +795,8 @@ progress=0.99  rate=0.70  eta=0
 **`item=` 接受液体**（2026-10-06 补）。传液体时返回体带 `kind:"liquid"`，
 字段换成液体的那组（`flammability` / `explosiveness` / `heatCapacity` / `viscosity` / `temperature`），
 `producers[]` 的 `how` 会区分 `crafter` / `solid-pump(+ baseEfficiency N，attribute X)` /
-`pump(地表，视建址而定)`；`consumers[]` 的 `how` 形如 `booster 6.0/s` 或 `consumes 6.0/s`
-（`amount` 在引擎里是**每 tick**，这里已乘 60 换成每秒，与 tooltip 同源）。
+`pump(地表，视建址而定)`；`consumers[]` 的 `how` 形如 `booster <N>/s` 或 `consumes <N>/s`
+（`amount` 在引擎里是**每 tick**，这里已乘 60 换成每秒，与游戏 tooltip 的显示口径一致）。
 
 > 为什么这条重要：**固体矿能靠 `/ore` 找到，液体不能** —— `/ore` 只列矿脉。
 > 于是「这个资源在图上找不到产地」和「这个资源根本不存在」在接口上长得一模一样，
@@ -844,7 +869,7 @@ progress=0.99  rate=0.70  eta=0
 
 | 字段 | 含义 | 为什么重要 |
 |---|---|---|
-| `drillSpeed` | 钻机在**满矿**（footprint 全是矿）时的理论速率，单位 **items/s** | 四台钻机的其余顶层字段**完全一样**，唯一区别是 `outputs[].tier` —— 而 **tier 只表示「能挖多硬的矿」，不表示快慢**。想横向比速度只有看这一栏（取法与引擎 tooltip 的 `Stat.drillSpeed` 同源：`60/drillTime × size²`）。实际速率还要乘矿种硬度带来的折扣，具体能挖多少看 `/ore` 与 `/drill` |
+| `drillSpeed` | 钻机在**满矿**（footprint 全是矿）时的理论速率，单位 **items/s** | 四台钻机的其余顶层字段**完全一样**，唯一区别是 `outputs[].tier` —— 而 **tier 只表示「能挖多硬的矿」，不表示快慢**。想横向比速度只有看这一栏。实际速率还要乘矿种硬度带来的折扣，具体能挖多少看 `/ore` 与 `/drill` |
 | `powerUse` | 耗电（顶层） | `powerProduction` **只覆盖发电方块**；耗电方块以前顶层什么都不给，会让人把要 0.5 电的硅冶炼厂读成「不用电」 |
 | `inputs[].optional` | `true` = **有它更快、没它也能干** | 引擎自己就把「可选加成」和「必需输入」分开了（`ConsumeLiquidBase.booster`）。四台钻机全都列着 `water` 且**看着像非接不可**，而实测不接水也 `eff=1.0` —— 看 `optional` 就不会误判 |
 | `outputs[]` 的 `kind` | `item` / `liquid` / `power` / `ore` / `unit` / `transport` | **产出不来自配方的方块也在里面**：泵类（`water-extractor` 等）给 `kind=liquid` + `perSecond` + `baseEfficiency` + `attribute`，钻机给 `kind=ore` + `tier`，**转运件给 `kind=transport` + `how` + `note`**。这三类别以前都是空数组 |
@@ -1076,9 +1101,9 @@ rot=3   -> appliedRot=3      ← 正常，两者一致
 这是如实反映，不是越界环绕。判据见 `ENGINE-NOTES` §三十三。
 
 **`anchorX` / `anchorY` 用来解释 footprint 落点**：接口一律给**中心**坐标，
-而引擎内部（`Edges.getEdges`、`getLinkedTiles`）按**左上角**定位，换算关系是
-`block.sizeOffset = -((size-1)/2)` —— `2x2 → 0`（中心就是左上那一格）、
-`3x3 → -1`、`5x5 → -2`。与其让每个 AI 自己推这个偏移，不如把换回来的结果直接给出。
+而引擎内部按**左上角**定位，两者差一个随尺寸变的偏移量。
+与其让每个 AI 自己推这个偏移，不如把换回来的结果直接给出 ——
+**所以算边界直接读 `anchorX`/`anchorY`，不要按「中心 ± size/2」推（那是错的）。**
 
 ### `/place` 的 `unit` 参数
 
@@ -1428,7 +1453,7 @@ base64 编码后放进 `data=`。导出返回里带 `format: "ai-arena-blueprint
 **跨版本的对局成绩不可比。** 成绩记录必须带上这个号 —— 这个接口改过不少次
 （`stuckReason`、批量的 `requested`/`accepted`、`/queue` 的 `cleared`、
 `/drill` 的 `itemsPerSecond`、SSE、蓝图……），而 `reviews/` 里几批数据是
-不同时期跑的。没有版本号，「这局 AI 是 3.2/s、那局是 2.1/s」根本说不清
+不同时期跑的。没有版本号，「这局 AI 是 N/s、那局是 M/s」根本说不清
 是不是同一个接口测出来的。
 
 ### 什么时候加号
