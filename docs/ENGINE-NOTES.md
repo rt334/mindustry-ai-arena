@@ -8,7 +8,7 @@ Mindustry v160.5 上，把两个 AI 放进同一张图对战，需要知道的�
 
 ## 一、坐标系与朝向
 
-**`rotation` 是「出料方向」，不是「接收方向」。**
+**`rotation` 是「出料方向」，不是「接收方向」。**（⚠ 这句只对**有朝向**的方块成立 —— 见下表）
 
 ```
 0 = 东 (+x)      1 = 南 (+y)
@@ -21,9 +21,23 @@ Mindustry v160.5 上，把两个 AI 放进同一张图对战，需要知道的�
 > 于是表现为「建筑都在、产率为 0」，极难定位。
 > 由 `reviews/REVIEW-ADDENDUM.md` 定位，本文此处已修正。
 
-传送带、分拣器、工厂的正面都按这个约定解释。
+### 术语表：`rotation` 在引擎里是**三件不同的事**
 
-**陷阱**：`Tile.relativeTo` 用的是**相反**的映射（`0=west 1=south 2=east 3=north`）。
+| 方块 | `Block.rotate` | `rotation` 是什么 | 取值 |
+|---|---|---|---|
+| `conveyor` / 钻机 / 炮塔 | `true` | **朝向**（出料 / 射击方向） | 0–3 |
+| `sorter` | `false` | **轮转状态**（两侧都收时先给哪边） | 0–15 |
+| `overflow-gate` / `underflow-gate` | `false` | **轮转状态**（与 sorter 同一套写法） | 0–15 |
+| 其余 `rotate = false` 的方块 | `false` | 不写也不读 `rotation` | 恒 0 |
+
+**⇒ 拿到 `/buildings` 的 `rotation`，先看 `block` 是哪种。**
+`sorter` **没有「正面」** —— 它的分流去向由**来路方向**决定（§四 / §八）；
+`gate` 的 `8` / `10` 是位掩码，**不是坏值**（§三十四）。
+判据是 `Block.rotate` 管「有没有朝向」，**不是**管「`rotation` 字段有没有被用」。
+
+**陷阱**：`Tile.relativeTo` 用的是**相反**的映射（`0=west 1=south 2=east 3=north`），
+而 `Building.nearby(int)` 用 `0=east 1=south 2=west 3=north`。
+两者一叠，正好就是「一侧进、对侧出」—— 读 `Sorter` / `Junction` 的源码时最容易在这里看反。
 只有 `Conveyor.acceptItem` 这类同时用到两者的地方会相互抵消。
 读代码时看到 `nearby()` 和 `relativeTo()` 并列，不要当成同一个约定。
 
@@ -106,7 +120,7 @@ footprint 里占多数。
 
 | 方块 | 行为 |
 |---|---|
-| `sorter` | 匹配 `config` 的物品走**正面**（`rotation` 侧）；**不匹配的走两侧** |
+| `sorter` | 匹配 `config` 的物品走**来路的对侧**（直通，**与 `rotation` 无关**）；**不匹配的走两侧**；两侧都不收才拒收。逐行源码见 §八 |
 | `router` | 向四周均分，但**会被成品倒灌堵死** |
 | `conveyor` | 吞吐有限；长线上 20 台矿机会把它喂饱和（每格 `outputAccepts=False`） |
 | `core-nucleus` | 5×5 |
@@ -114,7 +128,9 @@ footprint 里占多数。
 `sorter` 的实用技巧：把 `config` 设成一个这条线上**永远不会出现的物品**，
 则所有物品都不匹配、**全部走两侧** —— 一次喂到两个方向。
 
-⚠ `sorter` 的 `rotation` 有时不跟随 `/place?rot=` 生效。优先用 `config` 间接控制流向。
+⚠ `sorter` **没有朝向**：它的 `rotation` 字段是「两侧都收时先给哪边」的**轮转状态**，
+不是方向 —— 所以 `/place?rot=` 对它没有意义（`Block.rotate = false`）。详见 §八 / §三十三。
+**但「匹配走对侧」这件事与 `rotation` 无关**，可以放心依赖。
 
 ---
 
@@ -210,25 +226,75 @@ u -> u.team.isAI() ? new BuilderAI(true, 400f) : new CommandAI()
 实测：把 `combustion-generator` 贴在**核心**旁边，`silicon-smelter` 一点电都拿不到；
 换成一串 `power-node` 从发电机搭到冶炼厂，`powerStatus` 立刻变 1.0。
 
-⇒ **不要指望「发电机贴着核心、冶炼厂贴着核心」就能自动并网。** 用 `power-node` 显式搭桥。
+⇒ **不要指望「发电机贴着核心、冶炼厂贴着核心」就能自动并网** —— 原因是
+**核心不是用电器**，它不参与电力网络。要让电送到某台机器，最短的路是
+**把发电机贴到那台机器上**（§29.1：发电机 ↔ 用电器紧贴就能直接供电），
+或者用 `power-node` 显式搭桥。
+
+> ⚠ **本条与 §29.1 的关系**（2026-10-07 澄清）：两条都成立，说的**不是同一件事** ——
+> 这里否掉的是「拿核心当电力中转」，§29.1 肯定的是「发电机直接贴用电器」。
+> **别把它读成「必须用 `power-node`」。**
+>
+> 另有一处**待复核**：2026-10-07 的一次实测里，`power-node` 与发电机**正交相邻**时，
+> 回读是「节点 ↔ 冶炼厂通了、节点 ↔ 发电机没通」。这与 §29.1 不冲突（node 不是用电器），
+> 但 **node 本该双向传导** —— 所以那一次要么是范围 / 连接数问题、要么另有规则。
+> **没做对照实验，这里不定论。**
 
 ---
 
 ## 八、`sorter` 的接收规则与一个副产品用法
 
+> ### ⚠ 本节此前是错的（2026-10-07 逐行核对源码后重写）
+>
+> 旧版在这里贴了一段「`Sorter.SorterBuild.acceptItem` 的源码」：
+> `return items.total() == 0 && (sortItem == null || sortItem == item);`
+> —— **那段代码在当前引擎里不存在**。它支撑的结论「sorter 只接收与 `config` 相同的物品，
+> 其他一律拒绝（不是送到侧面）」**也是错的**，而且因为它带「源码」背书，
+> 比 §四 的正确说法更容易被信。**这是本项目里最贵的一类错：伪造的证据比没有证据更坏。**
+
+**真实源码**（`Sorter.java:96-143`，逐行读过）：
+
 ```java
-// Sorter.SorterBuild
 public boolean acceptItem(Building source, Item item){
-    return items.total() == 0 && (sortItem == null || sortItem == item);
+    Building to = getTileTarget(item, source, false);
+    return to != null && to.acceptItem(this, item) && to.team == team;
+}
+
+public Building getTileTarget(Item item, Building source, boolean flip){
+    int dir = source.relativeTo(tile.x, tile.y);   // 从 source 看 tile 的方向
+    if(dir == -1) return null;
+    if(((item == sortItem) != invert) == enabled){
+        to = nearby(dir);                          // ← 匹配：nearby(dir) 是「来路的对侧」
+    }else{
+        Building a = nearby(Mathf.mod(dir - 1, 4)); // ← 不匹配：走两侧
+        Building b = nearby(Mathf.mod(dir + 1, 4));
+        ...哪边收走哪边；两边都收则按 rotation 的对应位轮转...
+    }
+    return to;
 }
 ```
 
-**`sorter` 只接收与 `config` 相同的物品，其他一律拒绝**（不是「送到侧面」）。
-所以：
+**`nearby(dir)` 为什么是「对侧」**（这一步最容易看反，已核到底）：
+`Tile.relativeTo(x,y,cx,cy)` 返回的是**从 (cx,cy) 看 (x,y) 的方向索引**，而
+`Building.nearby(int)` 的映射是 `0=东 1=南 2=西 3=北`（`Building.java:530-539`）。
+两者一叠即可判定：source 在**西**时 `x <= cx-1` ⇒ `relativeTo` 返回 **0** ⇒
+`nearby(0)` 是**东** —— 正是 source 的对面。其余三个方向同理。
 
-- 想让 **A 通过、B 被挡**：把 `sorter` 的 `config` 设成 A。B 会被拒收、退回上游。
-- `sorter` 的 `rotation` **不随 `/place?rot=` 生效**（实测传 `rot=3`，建成后是 `r0`）。
-  依赖方向的分流不可靠，别用。
+**⇒ 三条语义，缺一不可**：
+
+| 情形 | 行为 |
+|---|---|
+| 物品**匹配** `config` | 走**来路的对侧**（直通）。**与 `rotation` 无关** |
+| 物品**不匹配** | 走**两侧**（`dir±1`），哪边收走哪边；两边都收则按 `rotation` 的对应位**轮流** |
+| **两侧都不收** | `getTileTarget` 返回 `null` ⇒ `acceptItem` 返回 `false` ⇒ **拒收、退回上游** |
+
+**所以「B 被拒收退回上游」这个现象是真的，但机理不是「sorter 只认 config 那个物品」** ——
+而是「**两侧都没人要它**」。分清这一点很实际：只要 B 的侧面有地方收，sorter 就会把 B 送过去。
+
+**`rotation` 在 sorter 上是另一个东西**：它不是朝向，而是「两侧都收时先给哪边」的
+**轮转状态**（源码里 `rotation ^= (1 << dir)`）。这与 `overflow-gate` / `underflow-gate`
+是同一类（见 §三十三 / §三十四）。`Block.rotate = false` 只说明它**没有朝向**，
+**不等于 `rotation` 字段恒 0** —— 旧版把这两件事混成了一件。
 
 **副产品用法（很有用）**：把**消耗型建筑直接放在混料传送带的正下方**。
 
@@ -1266,8 +1332,22 @@ public void hit(Bullet bullet){
 而同一批下的 `conveyor`（同样 `rot=2`）回读是 **2**。
 
 根因在源码：`Block.java:122` `public boolean rotate;` —— **默认 false**，
-而 `Sorter` 的构造函数里没把它设成 `true`。`rotate = false` 的方块在引擎里
-不写入 rotation，所以它**永远是 0**。
+而 `Sorter` 的构造函数里没把它设成 `true`。
+
+> ### ⚠ 但本节原来那句结论是**过度概括**（2026-10-07 改正）
+>
+> 原文写「`rotate = false` 的方块在引擎里不写入 rotation，所以它**永远是 0**」——
+> **错**。`rotate = false` 只说明这个方块**没有「朝向」这个概念**（放它的时候
+> `rotation` 不被当成方向写入，所以 `/place?rot=` 对它没有意义）；
+> **`rotation` 字段本身照旧存在，而且会被引擎当作别的东西用**：
+>
+> - `Sorter` —— 轮转状态（`Sorter.java:137-138`：`rotation & (1 << dir)` 选边、
+>   `rotation ^= (1 << dir)` 翻转）
+> - `overflow-gate` / `underflow-gate` —— 同一套写法（见 §三十四）
+>
+> 所以对这类方块，「回读是 0」只描述**刚建好那一刻**，之后引擎会改它。
+> §三十四 当时把 gate 称作「§三十三 漏掉的第三种情况」，其实 gate 与 `sorter`
+> **是同一类**，被漏掉的是「`rotate=false` ⇒ `rotation` 恒 0」这个推论本身。
 
 **这修正了一条复盘记录**：「`/buildings` 回读 `rotation` 恒为 0」不是普遍缺陷，
 它只发生在**不可旋转的方块**上。判据就是 `Block.rotate` ——
@@ -1283,9 +1363,12 @@ conveyor `2→2`、`0→0`、`9→1`、`-1→3`。
 
 ## 三十四、`overflow-gate` / `underflow-gate` 的 `rotation` 是**位掩码**，不是朝向
 
-**这是 §三十三 漏掉的第三种情况。** §三十三 说「`rotate=false` 的方块 `rotation` 恒为 0」——
-那说的是 `sorter` 这类。而 gate 是第三种：**引擎把它的 `rotation` 当作一个四位的
-轮转记录器**，所以 `/buildings` 里能读到 **8、10 这种超出 0–3 的值**。
+**`sorter` 与 gate 是同一类**（2026-10-07 改正 —— 本节原来把 gate 说成
+「§三十三 漏掉的第三种」，其实被漏掉的是 §三十三 那条推论本身）：
+**引擎把这类方块的 `rotation` 当作一个四位的轮转记录器**，
+所以 `/buildings` 里能读到 **8、10 这种超出 0–3 的值**。
+`sorter` 用的是同一套写法（`Sorter.java:137-138`），只是它的轮转被触发得少 ——
+**只有两侧都收的时候才轮到它**（见 §八）。
 
 源码（`OverflowGate.getTileTarget`）：
 
@@ -1308,11 +1391,16 @@ else{
 所以 `rotation` 的 bit `from` 记录的是「从这条边来的货，上次走了 a 还是 b」。
 `rot=8` = bit 3 置位；`rot=10` = bit 3 + bit 1 同时置位。
 
-| 方块 | `rotation` 是什么 | 取值 |
-|---|---|---|
-| `conveyor` / 钻机 / 炮塔 | **朝向** | 0–3 |
-| `sorter` 这类 `rotate = false` | 无意义，恒 0 | 0 |
-| **`overflow-gate` / `underflow-gate`** | **轮转状态（位掩码）** | 0–15 |
+| 方块 | `Block.rotate` | `rotation` 是什么 | 取值 |
+|---|---|---|---|
+| `conveyor` / 钻机 / 炮塔 | `true` | **朝向** | 0–3 |
+| **`sorter`** | `false` | **轮转状态（位掩码）** —— 两侧都收时先给哪边 | 0–15 |
+| **`overflow-gate` / `underflow-gate`** | `false` | **轮转状态（位掩码）** —— 与 sorter 同一套写法 | 0–15 |
+| 其余 `rotate = false` 的方块 | `false` | 不写也不读 `rotation` | 恒 0 |
+
+**判据是**：`Block.rotate` 管的是「**有没有朝向**」，不是「`rotation` 这个字段有没有被用」。
+没有朝向的方块里，有一部分（`sorter` / gate）把**同一个字段**拿去当轮转状态用了 ——
+**所以同一个字段名在两类方块上是两件不同的事**，见下。
 
 **对 AI 的影响**：拿到 `rot=8` 只会有两种反应 —— 要么以为朝向字段坏了，
 要么按「0–3 之外一律非法」忽略掉。而**这一位恰恰是「分配是否公平」的唯一记录**。
@@ -1382,13 +1470,21 @@ y=102  两条主干南下到底后拐进核心 (287,102)-(291,106)
 
 ### 为什么 `junction` 与 `underflow-gate` 交替
 
+> ⚠ **本表 `junction` 那一行此前写的是「四向均分：东 / 西 / 南各一份」——那是 `router` 的语义，不是 `junction` 的。**
+> 2026-10-07 逐行核对 `Junction.java` 后改正：`handleItem` 把货存进 `buffer.accept(relative, item)`
+> 的**来路方向**槽，`updateTile` 再用 `nearby(i)` 从**同一个槽**取出送去 ——
+> 一来一回正好是**对侧**。从北边进 ⇒ `relativeTo` 返回 1 ⇒ `nearby(1)` 是**南** ⇒ **直通**。
+> 同一段下面那句「`junction` 只穿过、不停留」本来是对的，两句话此前并存。
+
 | 件 | 从北边来的货 |
 |---|---|
-| `junction` | 四向均分：东 / 西 / 南各一份 —— **总有货继续往下** |
+| `junction` | **交叉直通**：一侧进、对侧出（北进 → 南出），**不往东西分**。它只负责让两股流各走各的、互不打结 |
 | `underflow-gate` | **优先两侧**（东西），两侧都不收才直行 —— **截留强，往下少** |
 
 两者交替 = 「放行一层、截留一层」的节奏。**这和 §十七 是同一件事的两面**：
 `junction` 只穿过、不停留；`gate` 才做带优先级的截留。
+**所以"每层往两侧送货"这个活是 `gate` 干的，不是 `junction`** ——
+`junction` 在分配列里起的是「让南北向的干流穿过东西向的支线而不混流」。
 
 **尚未验证**：交替是否必要。全是 `junction` 会均分但每层都不够；全是 `gate` 会让上层吃光。
 按 §二十五 的纪律这属于「一次只改一个变量」才能回答的问题 ——
