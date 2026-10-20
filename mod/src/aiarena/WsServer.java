@@ -63,7 +63,9 @@ public class WsServer {
 
     /** 支持的频道。 */
     private static final Set<String> CHANNELS =
-        new LinkedHashSet<>(Arrays.asList("state", "units", "buildings", "factory", "drill", "events"));
+        new LinkedHashSet<>(Arrays.asList("state", "units", "buildings",
+                                          "factory", "drill", "events",
+                                          "rates", "stalls"));
 
     /** RFC 6455 规定的握手魔术串。 */
     private static final String WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -206,7 +208,9 @@ public class WsServer {
             conn.start();
             conn.send("{\"op\":\"hello\",\"agent\":" + Json.str(agent.id)
                       + ",\"team\":" + Json.str(agent.team() == null ? "" : agent.team().name)
-                      + ",\"channels\":[\"state\",\"units\",\"buildings\",\"factory\",\"drill\",\"events\"]"
+                      // 跟着 CHANNELS 走 —— 别再写死一份，
+                      // 加频道要改两处是 TODO §14.2#2 那类缺陷的温床
+                      + ",\"channels\":" + jsonArray(CHANNELS)
                       + ",\"hz\":5,\"wsPort\":" + socket.getLocalPort()
                       + ",\"apiPort\":" + httpPort + "}");
             AIArena.log("ws client connected: " + agent.id

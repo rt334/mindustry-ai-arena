@@ -52,6 +52,9 @@ BUILD_DIR = ROOT / "_work" / "offline-classes"
 EXPECTED_ACTIONS = 37        # route() 里 case 的个数（= /v1/<agent>/<action> 端点数）
 EXPECTED_JAR_ITEMS = 50      # 1 mod.hjson + 1 MANIFEST.MF + 2 目录项 + 46 class
 EXPECTED_CLASSES = 46
+# WS 频道。加一个要同时改三处：CHANNELS 集合、channelJson 的实现、API.md 的通道表。
+EXPECTED_CHANNELS = {"state", "units", "buildings", "factory",
+                     "drill", "events", "rates", "stalls"}
 
 results: list[tuple[str, str, str]] = []   # (name, status, detail)
 
@@ -211,6 +214,41 @@ def source_checks() -> None:
             continue
         for c in claims:
             eq(f"{rel} 写死的 jar 条目数（{c}）", int(c), EXPECTED_JAR_ITEMS)
+
+    # --- WS 频道：集合 / 实现 / 文档三处必须一致 ---
+    # 2026-10-20 加 rates、stalls 时踩到的形状：加频道要动三处，而且
+    # `hello` 里原本还写死过一份列表（已改为跟着 CHANNELS 走）。
+    # 只加进 CHANNELS 不实现 channelJson，客户端会收到 `data: null` 且不知原因。
+    ws_src = ROOT / "mod" / "src" / "aiarena" / "WsServer.java"
+    if ws_src.exists():
+        ws = ws_src.read_text(encoding="utf-8")
+        m = re.search(
+            r"CHANNELS\s*=\s*\n?\s*new LinkedHashSet<>\(\s*Arrays\.asList\((.*?)\)\s*\)",
+            ws, re.S)
+        if m:
+            chans = set(re.findall(r'"([a-z]+)"', m.group(1)))
+            rec("WS 频道集合", "PASS" if chans == EXPECTED_CHANNELS else "FAIL",
+                f"实际: {sorted(chans)}")
+            body = re.search(r"static String channelJson\(.*?\n    }\n", http, re.S)
+            if body:
+                cases = set(re.findall(r'case\s+"([a-z]+)"\s*->', body.group(0)))
+                missing = sorted(chans - cases)
+                rec("每个 WS 频道都有 channelJson 分支",
+                    "PASS" if not missing else "FAIL",
+                    f"缺: {missing}" if missing else "全有")
+            else:
+                rec("每个 WS 频道都有 channelJson 分支", "SKIP",
+                    "没找到 channelJson 函数体")
+            api_p = ROOT / "docs" / "API.md"
+            if api_p.exists():
+                api = api_p.read_text(encoding="utf-8")
+                missing_doc = sorted(c for c in chans if f"| `{c}` |" not in api)
+                rec("API.md 写全了 WS 频道", "PASS" if not missing_doc else "FAIL",
+                    f"缺: {missing_doc}" if missing_doc else "全有")
+        else:
+            rec("WS 频道集合", "SKIP", "没找到 CHANNELS 定义（改写法了？）")
+    else:
+        rec("WS 频道集合", "SKIP", "WsServer.java 不存在")
 
     # --- 死参数扫描（TODO §十一）：读进来但从未使用的请求参数 ---
     # 这类参数不报错、不告警、返回值也正常，只在语义上骗人 —— 只能靠扫。

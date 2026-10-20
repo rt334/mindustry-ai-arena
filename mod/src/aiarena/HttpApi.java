@@ -4976,6 +4976,21 @@ public final class HttpApi {
             case "events" -> {
                 return EventLog.recentJson(40);
             }
+            case "rates" -> {
+                // 窗口固定 5 秒：这个通道是给**闭环控制**用的（刚改完有没有效果），
+                // 短窗口滞后小。要长窗口做统计就调 REST `/rates?window=N`。
+                //
+                // 成本：ratesJson 会扫一遍 1440 项环形缓冲找窗口两端，
+                // 再遍历物品表。每帧一次、每连接一次，实测 tick 率无可测变化
+                // （见 docs/TODO.md §16.1 的测法）。
+                return RateTracker.ratesJson(team, 5.0);
+            }
+            case "stalls" -> {
+                // 直接读主线程每 tick 建好的快照引用（`StallWatch.SNAP`）——
+                // O(1)、无锁、不碰世界。**不要**在这里调 viewOf 之外的扫描。
+                // 只给数组，条数客户端自己数（REST 那边才给 stalledCount）。
+                return (String) StallWatch.viewOf(team.id)[1];
+            }
             default -> {
                 return null;
             }

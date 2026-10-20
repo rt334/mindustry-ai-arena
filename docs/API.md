@@ -1280,10 +1280,77 @@ POST /place?shape=path&path=273,78;278,78;278,82&block=conveyor
 
 ## 五、WebSocket
 
-`ws://127.0.0.1:7200/ws`
+`ws://127.0.0.1:7200/ws?token=<token>`
 
-连接后发送订阅消息，之后服务端持续推送事件。
-参考实现见仓库的 `ws-client.py`（含自动重连与重订阅）。
+消息全部是 JSON 文本帧。参考实现见仓库的 `ws-client.py`（含自动重连与重订阅）。
+
+**为什么用它**：HTTP 轮询一轮（`state`+`units`+`buildings`+`rates`+`stalls`）
+实测 P50 **47.8 ms**（约 21 Hz 上限），而 WS 一轮全通道约 **19 ms**；
+更关键的是**命令可以流水线发**（带 id、异步回 ack），不用一发一收。
+
+### 5.1 客户端 → 服务端
+
+```json
+{"op":"sub","channels":["state","units","buildings","factory","drill","events","rates","stalls"],"hz":20}
+{"op":"cmd","id":42,"endpoint":"place","params":{"x":"288","y":"101","block":"conveyor","rot":"1"}}
+{"op":"ping"}
+```
+
+`cmd` 的 `params` 值**必须都写成字符串** —— 服务端按 `map[string]string` 解析，
+数字写成 JSON number 会被当作字符串化后的值，不保证等价。
+
+`cmd` 会被服务端转成一次**本机** HTTP 调用（复用全部 REST 端点的鉴权、
+可见性校验与错误码），所以它省的是**客户端等待**，不是链路。
+
+### 5.2 服务端 → 客户端
+
+```json
+{"op":"hello","agent":"beta","team":"crux","channels":[…],"hz":5,"wsPort":7200,"apiPort":7199}
+{"op":"subok","channels":[…],"hz":20}
+{"ch":"units","tick":1234,"data":[…]}
+{"op":"ack","id":42,"status":200,"body":{"ok":true,"data":{…}}}
+{"op":"err","message":"unknown op"}
+{"op":"pong"}
+```
+
+`ack` 的 `status` 就是对应 REST 端点会返回的 HTTP 状态码；`status: 0` 表示
+服务端内部调用抛异常。**按 `id` 对账**，别假设按序返回。
+
+### 5.3 通道
+
+| 通道 | `data` 形态 | 内容 |
+|---|---|---|
+| `state` | 对象 | tick / playing / paused / fog / team / teamId / worldW / worldH / 计数 |
+| `units` | 数组 | 己方全部 + 当前视野内敌方 |
+| `buildings` | 数组 | 己方全部 + 视野内敌方；库存只给自己的队伍 |
+| `factory` | 数组 | 工厂计划、进度、需求、出货口 |
+| `drill` | 数组 | 矿机 `dominantItem` / `itemsPerSecond` |
+| `events` | 数组 | 最近 40 条事件 |
+| `rates` | 对象 | 核心库存净速率，**固定 5 秒窗口**（`{team,windowSeconds,fromTick,toTick,sampleCount,core,stored}`） |
+| `stalls` | 数组 | 产线警报，与 `GET /stalls` 的 `stalls` **同源同一份快照**（不含 `stalledCount`，条数自己数） |
+
+`rates` 与 `stalls` 是 2026-10-20 加的。在此之前它们只能轮询。
+
+### 5.4 频率
+
+`hz` 取 1–60（超范围会被夹到这个区间）。
+
+**实测的实际上是打折的**（`docs/TODO.md` §十六）：
+
+| 请求 `hz` | 实测/秒/通道 |
+|---|---|
+| 2 | 2.00 |
+| 10 | 9.37 |
+| 20 | 17.77 |
+| 60 | **52.31** |
+
+`hz ≤ 10` 基本精确，越高档位损失越大（`hz=60` 只有 87%）。
+原因是服务端按整毫秒判定推送时机，与 60 fps 的帧长（16.67 ms）没有余量。
+
+**通道数也会摊薄每通道频率**：6 通道约 53 Hz/通道，8 通道约 **40 Hz/通道**
+（总吞吐约 320 帧/秒是上限）。所以别指望「8 个通道各 60 Hz」。
+
+**推送不拖慢游戏**：8 通道 60 Hz 订阅下，服务器 tick 率 60.00 → 59.90（噪声内）。
 
 ---
 

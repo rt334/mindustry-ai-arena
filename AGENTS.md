@@ -69,7 +69,7 @@ $mj = 'C:\dsh\Mindustry-src\desktop\build\libs\Mindustry.jar'
 | 层次 | 手段 | 要不要起游戏 |
 |---|---|---|
 | 编译 / class 集合一致性 | 上面的 `javac` + `jar tf` 比对 | 不要 |
-| **离线断言套件**（91 项：JSON 转义 / 响应信封 / 审计判定 / 状态码映射 / 端点数量 / 错误码集合 / `shape` 取值 / jar 条目 / 文档里写死的数字 / 死参数扫描 / `StallWatch` 快照同源） | `python drive/offline-checks.py`（`--src` 可跳过 JVM） | 不要 |
+| **离线断言套件**（94 项：JSON 转义 / 响应信封 / 审计判定 / 状态码映射 / 端点数量 / 错误码集合 / `shape` 取值 / jar 条目 / 文档里写死的数字 / **WS 频道三处同源** / 死参数扫描 / `StallWatch` 快照同源） | `python drive/offline-checks.py`（`--src` 可跳过 JVM） | 不要 |
 | **`skill/` 边界检查**（参赛者可见包有没有泄漏游戏内情） | `python drive/check-boundary.py`（先 `--selftest`） | 不要 |
 | **文档按需检索**（取某一节，而不是整份读） | `python drive/docs-index.py --grep/-read` | 不要 |
 | 全功能回归 | `.\stress-test.ps1`（62 用例，自起服务器） | 要 |
